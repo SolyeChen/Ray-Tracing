@@ -2,6 +2,8 @@
 
 Rray Tracing Series by Peter Shirley
 
+[toc]
+
 # 1. 概览
 这些年来我教过很多图形课。我经常在光线追踪中这样做，因为你被迫编写所有代码，但你仍然可以在没有 API 的情况下获得很酷的图像。
 
@@ -78,3 +80,590 @@ build/inOneWeekend.exe > image.ppm
 ```
 
 使用PPM图片阅读器打开来预览图片信息。（这里推荐在线软件）
+
+
+
+
+## 2.3. 添加进度指示器
+在继续之前，让我们在输出中添加一个进度指示器。这是跟踪长渲染进度的便捷方法，也可以识别由于无限循环或其他问题而暂停的运行。
+
+我们的程序将图像输出到标准输出流（std::cout），所以不要管它，而是写到错误输出流（std::cerr）
+
+```cpp
+    for (int j = image_height-1; j >= 0; --j) {
+        //std::cerr << "\rScanlines remaining: " << j << ' ' << std::flush;
+        for (int i = 0; i < image_width; ++i) {
+            auto r = double(i) / (image_width-1);
+            auto g = double(j) / (image_height-1);
+            auto b = 0.25;
+
+            int ir = static_cast<int>(255.999 * r);
+            int ig = static_cast<int>(255.999 * g);
+            int ib = static_cast<int>(255.999 * b);
+
+            std::cout << ir << ' ' << ig << ' ' << ib << '\n';
+        }
+    }
+
+    //std::cerr << "\nDone.\n";
+```
+> Main render loop with progress reporting
+
+# 3. 三维向量类
+几乎所有的图形程序都有一些用于存储几何向量和颜色的类。在许多系统中，这些矢量是4D的（3D加上一个同质坐标表示几何，RGB加上一个alpha透明通道表示颜色）。对于我们的目的，三个坐标就足够了。我们将使用相同的vec3类来表示颜色、位置、方向、偏移量，等等。
+
+有些人不喜欢这样做，因为它不能防止你做一些愚蠢的事情，比如给一个位置添加颜色。他们说得很有道理，但在不明显错误的情况下，我们总是要走 "减少代码 "的路线。尽管这样，我们还是为vec3声明了两个别名：point3和color。
+
+因为这两个类型只是vec3的别名，所以如果你向一个参数为point3的函数传递颜色，你不会得到警告。我们使用它们只是为了澄清意图和用途。
+
+## 3.1. 变量和方法
+
+这是我的vec3类的顶部部分。
+
+```cpp
+#ifndef VEC3_H
+#define VEC3_H
+
+#include <cmath>
+#include <iostream>
+
+using std::sqrt;
+
+class vec3 {
+    public:
+        vec3() : e{0,0,0} {}
+        vec3(double e0, double e1, double e2) : e{e0, e1, e2} {}
+
+        double x() const { return e[0]; }
+        double y() const { return e[1]; }
+        double z() const { return e[2]; }
+
+        vec3 operator-() const { return vec3(-e[0], -e[1], -e[2]); }
+        double operator[](int i) const { return e[i]; }
+        double& operator[](int i) { return e[i]; }
+
+        vec3& operator+=(const vec3 &v) {
+            e[0] += v.e[0];
+            e[1] += v.e[1];
+            e[2] += v.e[2];
+            return *this;
+        }
+
+        vec3& operator*=(const double t) {
+            e[0] *= t;
+            e[1] *= t;
+            e[2] *= t;
+            return *this;
+        }
+
+        vec3& operator/=(const double t) {
+            return *this *= 1/t;
+        }
+
+        double length() const {
+            return sqrt(length_squared());
+        }
+
+        double length_squared() const {
+            return e[0]*e[0] + e[1]*e[1] + e[2]*e[2];
+        }
+
+    public:
+        double e[3];
+};
+
+// Type aliases for vec3
+using point3 = vec3;   // 3D point
+using color = vec3;    // RGB color
+
+#endif
+
+```
+
+我们在这里使用double，但有些射线追踪器使用float。任何一种都可以--按照你自己的口味。
+
+## 3.2. vec3 的实用方法
+头文件的第二部分包含vector向量实用函数。
+```cpp
+// vec3 Utility Functions
+
+inline std::ostream& operator<<(std::ostream &out, const vec3 &v) {
+    return out << v.e[0] << ' ' << v.e[1] << ' ' << v.e[2];
+}
+
+inline vec3 operator+(const vec3 &u, const vec3 &v) {
+    return vec3(u.e[0] + v.e[0], u.e[1] + v.e[1], u.e[2] + v.e[2]);
+}
+
+inline vec3 operator-(const vec3 &u, const vec3 &v) {
+    return vec3(u.e[0] - v.e[0], u.e[1] - v.e[1], u.e[2] - v.e[2]);
+}
+
+inline vec3 operator*(const vec3 &u, const vec3 &v) {
+    return vec3(u.e[0] * v.e[0], u.e[1] * v.e[1], u.e[2] * v.e[2]);
+}
+
+inline vec3 operator*(double t, const vec3 &v) {
+    return vec3(t*v.e[0], t*v.e[1], t*v.e[2]);
+}
+
+inline vec3 operator*(const vec3 &v, double t) {
+    return t * v;
+}
+
+inline vec3 operator/(vec3 v, double t) {
+    return (1/t) * v;
+}
+
+inline double dot(const vec3 &u, const vec3 &v) {
+    return u.e[0] * v.e[0]
+         + u.e[1] * v.e[1]
+         + u.e[2] * v.e[2];
+}
+
+inline vec3 cross(const vec3 &u, const vec3 &v) {
+    return vec3(u.e[1] * v.e[2] - u.e[2] * v.e[1],
+                u.e[2] * v.e[0] - u.e[0] * v.e[2],
+                u.e[0] * v.e[1] - u.e[1] * v.e[0]);
+}
+
+inline vec3 unit_vector(vec3 v) {
+    return v / v.length();
+}
+
+
+```
+>[vec3.h] vec3 utility functions
+
+&nbsp;
+
+## 3.3. Color使用方法
+
+使用我们的新vec3类，我们将创建一个实用函数，将单个像素的颜色写到标准输出流。
+```cpp
+#pragma once
+
+#include "vector3.h"
+
+void WriteColor(std::ostream& out, color pixelColor) {
+    out << static_cast<int>(255.999 * pixelColor.x()) << ' '
+        << static_cast<int>(255.999 * pixelColor.y()) << ' '
+        << static_cast<int>(255.999 * pixelColor.z()) << '\n';
+
+}
+```
+>[color.h] color utility functions
+
+&nbsp;
+
+现在我们可以把main函数改为如下：
+
+```cpp
+#include "color.h"
+#include "vec3.h"
+
+#include <iostream>
+
+int main() {
+    // Image
+
+    const int image_width = 256;
+    const int image_height = 256;
+
+    // Render
+
+    std::cout << "P3\n" << image_width << ' ' << image_height << "\n255\n";
+
+    for (int j = image_height-1; j >= 0; --j) {
+        std::cerr << "\rScanlines remaining: " << j << ' ' << std::flush;
+        for (int i = 0; i < image_width; ++i) {
+            color pixel_color(double(i)/(image_width-1), double(j)/(image_height-1), 0.25);
+            write_color(std::cout, pixel_color);
+        }
+    }
+
+    std::cerr << "\nDone.\n";
+}
+```
+
+> [main.cc] Final code for the first PPM image
+
+# 4. 光线， 一个简单的相机和背景
+本文档当中 射线~=光线
+## 4.1. The Ray Class
+所有的光线追踪器都有一个东西，那就是光线类和沿光线看到什么颜色的计算。让我们把射线想象成一个函数 $P(t)=A+tb$。这里 $P$ 是沿三维线的一个三维位置。$A$ 是射线的原点，$b$是射线的方向。射线参数$t$是一个实数（代码中为双数）。插入不同的$t$，$P(t)$ 将点沿射线移动。加入负的tt值，你就可以在三维线上的任何地方移动。对于正 $t$，你只能得到 $A$ 前面的部分，这就是通常所说的半线或射线。
+
+![图 1](images/Liner%20interpolation.png)  
+>Linear interpolation
+
+函数 $P(t)$ 以更粗略的代码形式，我称之为`ray::at(t)`。
+
+```cpp
+#ifndef RAY_H
+#define RAY_H
+
+#include "vec3.h"
+
+class ray {
+    public:
+        ray() {}
+        ray(const point3& origin, const vec3& direction)
+            : orig(origin), dir(direction)
+        {}
+
+        point3 origin() const  { return orig; }
+        vec3 direction() const { return dir; }
+
+        point3 at(double t) const {
+            return orig + t*dir;
+        }
+
+    public:
+        point3 orig;
+        vec3 dir;
+};
+
+#endif
+```
+>[ray.h] The ray class
+
+## 4.2. 将射线射往场景
+现在我们准备转弯，做一个光线追踪器。
+
+在核心部分，光线追踪器通过像素发送光线，并计算在这些光线的方向上看到的颜色。涉及的步骤是：（1）计算从眼睛到像素的射线，（2）确定射线与哪些物体相交，以及（3）计算该交点的颜色。
+
+当第一次开发光线追踪器时，我总是做一个简单的摄像机，以使代码启动和运行。我还做了一个简单的`ray_color(ray)`函数，返回背景的颜色（一个简单的梯度）。
+
+我经常在使用方形图像进行调试时遇到麻烦，因为我太频繁地转置 $x$ 和 $y$，所以我将使用非方形图像。现在我们将使用16：9的长宽比，因为这很常见。
+
+除了设置渲染图像的像素尺寸外，我们还需要设置一个*虚拟视口*，通过它来传递我们的场景射线。对于标准的方形像素间距，视口的长宽比应该与我们的渲染图像相同。我们将选择一个高度为两个单位的视口。我们还将设置投影平面和投影点之间的距离为一个单位。这被称为 "焦点长度"，不要与 "对焦距离"混淆，我们将在后面介绍。
+
+我将把 "眼睛"（或相机中心，如果你认为是相机的话）放在 $(0,0,0)$ 。我将让Y轴向上，而X轴向右。为了尊重`右手坐标系`的惯例，进入屏幕的是负Z轴。我将从左上角横穿屏幕，并使用两个沿屏幕两侧的偏移矢量在屏幕上移动射线端点。请注意，我没有让射线方向成为一个单位长度的向量，因为我认为不这样做会使代码更简单，速度更快。
+
+![图 2](images/Camera%20geometry.png)  
+>Camera geometry
+&nbsp;
+
+在下面的代码中，射线 `r` 大约到了像素中心（我暂时不担心精确性，因为我们以后会添加抗锯齿）。
+```cpp
+#include "color.h"
+#include "ray.h"
+#include "vec3.h"
+
+#include <iostream>
+
+color ray_color(const ray& r) {
+    vec3 unit_direction = unit_vector(r.direction());
+    auto t = 0.5*(unit_direction.y() + 1.0);
+    return (1.0-t)*color(1.0, 1.0, 1.0) + t*color(0.5, 0.7, 1.0);
+}
+
+int main() {
+
+    // Image
+    const auto aspect_ratio = 16.0 / 9.0;
+    const int image_width = 400;
+    const int image_height = static_cast<int>(image_width / aspect_ratio);
+
+    // Camera
+
+    auto viewport_height = 2.0;
+    auto viewport_width = aspect_ratio * viewport_height;
+    auto focal_length = 1.0;
+
+    auto origin = point3(0, 0, 0);
+    auto horizontal = vec3(viewport_width, 0, 0);
+    auto vertical = vec3(0, viewport_height, 0);
+    auto lower_left_corner = origin - horizontal/2 - vertical/2 - vec3(0, 0, focal_length);
+
+    // Render
+
+    std::cout << "P3\n" << image_width << " " << image_height << "\n255\n";
+
+    for (int j = image_height-1; j >= 0; --j) {
+        std::cerr << "\rScanlines remaining: " << j << ' ' << std::flush;
+        for (int i = 0; i < image_width; ++i) {
+            auto u = double(i) / (image_width-1);
+            auto v = double(j) / (image_height-1);
+            ray r(origin, lower_left_corner + u*horizontal + v*vertical - origin);
+            color pixel_color = ray_color(r);
+            write_color(std::cout, pixel_color);
+        }
+    }
+
+    std::cerr << "\nDone.\n";
+}
+```
+>[main.cc] Rendering a blue-to-white gradient
+&nbsp;
+
+`ray_color(ray)` 函数在将射线方向缩放为单位长度后，根据 $y$ 坐标的高度线性地混合白色和蓝色（ $-1.0<y<1.0$ ）。因为我们看的是矢量归一化后的 $y$ 高度，所以你会发现除了垂直渐变外，颜色还有一个水平渐变。
+
+然后我做了一个标准的图形技巧，将其缩放为 $0.0≤t≤1.0$ 。当 $t=1.0$ 时，我想要蓝色。当 $t=0.0$ 时，我想要白色。在这两者之间，我想要一个混合。这就形成了一个 "线性混合"，或 "线性插值"，或简称 "lerp"，在两个事物之间。
+
+lerp的形式总是这样的：$blendedValue=(1−t)⋅startValue+t⋅endValue$
+
+$t$ 从0到1。在我们的案例中，这产生了:
+
+![blueToWhiteGradient](images/blueToWhiteGradient.png)  
+>A blue-to-white gradient depending on ray Y coordinate
+
+&nbsp;
+
+# 5. 添加一个球体
+让我们为我们的光线追踪器添加一个单一的对象。人们经常在光线追踪器中使用球体，因为计算光线是否击中球体是非常简单的。
+## 5.1 射线-球体 交叉点
+回顾一下，以原点为中心的半径为 $R$ 的球体的方程式是 $x^2+y^2+z^2=R^2$ 。换句话说，
+
+1. 如果给定的点 $(x,y,z)$ 在球体上，那么 $x^2+y^2+z^2=R^2$。
+
+2. 如果给定的点 $(x,y,z)$ 在球体内部，那么$x^2+y^2+z^2<R^2$。
+
+3. 如果给定的点 $(x,y,z)$ 在球体外部，那么 $x^2+y^2+z^2>R^2$。
+
+
+如果球心在$(Cx,Cy,Cz)$，情况就更难看了：
+
+$(x-Cx)^2+（y-Cy）^2+（z-Cz）^2=r^2$
+
+在图形学中，你几乎总是希望你的公式是以向量为单位的，所以所有的$x/y/z$的东西都在vec3类中的罩子里。
+
+</br>
+
+你可能会注意到，
+
+从中心 $C=(Cx,Cy,Cz)$ 到点 $P=(x,y,z)$ 的向量是$(P-C)$，
+
+因此  $(P-C)⋅(P-C)=(x-Cx)^2+(y-Cy)^2+(z-Cz)^2$。
+
+因此，球体的矢量方程为 $(P-C)⋅(P-C)=r^2$ 。
+
+</br>
+
+我们可以将其理解为 "任何满足此方程的点 $P$ 都在球面上"。我们想知道我们的射线$P(t)=A+tb$ 是否曾经击中球体的任何地方。如果它确实击中了球体，那么就有某个 $t$，对于这个 $t$，$P(t)$ 满足球体方程。
+
+所以我们要找的是任何一个 $t$，在那里这是真的：
+
+$(P(t)-C)⋅(P(t)-C)=r^2$
+
+或展开射线 $P(t)$ 的完整形式：
+
+$(A+tb-C)⋅(A+tb-C)=r2$
+
+矢量代数的规则是我们在这里所希望的。如果我们展开这个方程并将所有项移到左边，我们就会得到。
+
+$t^2b^2+2tb⋅(A-C)+(A-C)⋅(A-C)-r^2=0$
+
+该方程中的向量和 $r$ 都是恒定的和已知的。未知数是 $t$，方程是一个二次方程，就像你在高中数学课上看到的那样。你可以求解 $t$，有一个平方根部分，它要么是正的（意味着有两个实数解），要么是负的（意味着没有实数解），要么是零（意味着有一个实数解）。在图形中，代数几乎总是与几何学有非常直接的关系。我们的情况是：
+![images/Ray-Spere%20intersection%20results](images/Ray-Spere%20intersection%20results.png)  
+
+> Ray-sphere intersection results
+
+## 5.2. 创建我们的第一个光线追踪图像
+如果我们把这个数学公式硬编码到我们的程序中，我们可以通过把任何击中我们在Z轴上-1处的小球的像素染成红色来测试它。
+
+```cpp
+bool hit_sphere(const point3& center, double radius, const ray& r) {
+    vec3 oc = r.origin() - center;
+    auto a = dot(r.direction(), r.direction());
+    auto b = 2.0 * dot(oc, r.direction());
+    auto c = dot(oc, oc) - radius*radius;
+    auto discriminant = b*b - 4*a*c;
+    return (discriminant > 0);
+}
+
+color ray_color(const ray& r) {
+    if (hit_sphere(point3(0,0,-1), 0.5, r))
+        return color(1, 0, 0);
+    vec3 unit_direction = unit_vector(r.direction());
+    auto t = 0.5*(unit_direction.y() + 1.0);
+    return (1.0-t)*color(1.0, 1.0, 1.0) + t*color(0.5, 0.7, 1.0);
+}
+```
+>[main.cc] Rendering a red sphere
+
+</br>
+
+我们得到的是这样的结果。
+
+![A%20Simple%20red%20sphere](images/A%20Simple%20red%20sphere.png)
+
+现在，这还缺少各种东西--比如阴影和反射光线以及不止一个物体--但我们已经接近完成了一半！
+
+有一点需要注意的是，我们测试了射线是否完全击中球体，只有 $t<0$ 的解决方案工作正常。如果你把球体中心改为 `z=+1`，你会得到完全相同的画面，因为你看到了你身后的东西。这不是一个特点！。我们接下来会解决这些问题。
+
+# 6. 表面法线和多个对象
+
+## 6.1. 用表面法线进行着色
+首先，让我们给自己找一个表面法线，这样我们就可以进行遮蔽。这是一个在交点处垂直于曲面的向量。
+
+法线有两个设计准则需要制定。首先是这些法线是否是单位长度。这对着色很方便，所以我会说是的，但我不会在代码中强制执行。这可能会产生一些微妙的错误，所以请注意这是个人的偏好，就像大多数设计决定一样。对于一个球体，向外的法线是在击中点的方向上减去中心。
+
+![Sphere%20surface-normal%20geometry](images/Sphere%20surface-normal%20geometry.png)  
+
+在地球上，这意味着从地心到你的矢量是直线上升的。现在让我们把它扔进代码中，并对它进行着色。我们还没有任何灯光或其他东西，所以让我们用一个颜色图来显示法线。一个用于可视化法线的常用技巧（因为假设 $n$ 是一个单位长度的向量--所以每个分量都在-1和1之间，这很容易，也很直观）是把每个分量映射到0到1的区间，然后把x/y/z映射到r/g/b。
+
+对于法线，我们需要击中点，而不仅仅是是否击中。我们在场景中只有一个球体，而且它就在摄像机的正前方，所以我们还不用担心tt的负值问题。我们只是假设最近的击中点（最小的 $t$）。代码中的这些变化让我们可以计算和可视化 $n$：
+
+```cpp
+double hit_sphere(const point3& center, double radius, const ray& r) {
+    vec3 oc = r.origin() - center;
+    auto a = dot(r.direction(), r.direction());
+    auto b = 2.0 * dot(oc, r.direction());
+    auto c = dot(oc, oc) - radius*radius;
+    auto discriminant = b*b - 4*a*c;
+    if (discriminant < 0) {
+        return -1.0;
+    } else {
+        return (-b - sqrt(discriminant) ) / (2.0*a);
+    }
+}
+
+color ray_color(const ray& r) {
+    auto t = hit_sphere(point3(0,0,-1), 0.5, r);
+    if (t > 0.0) {
+        vec3 N = unit_vector(r.at(t) - vec3(0,0,-1));
+        return 0.5*color(N.x()+1, N.y()+1, N.z()+1);
+    }
+    vec3 unit_direction = unit_vector(r.direction());
+    t = 0.5*(unit_direction.y() + 1.0);
+    return (1.0-t)*color(1.0, 1.0, 1.0) + t*color(0.5, 0.7, 1.0);
+}
+```
+> [main.cc] Rendering surface normals on a sphere
+
+这就产生了这张图片:
+
+![sphereNormals](images/sphereNormals.png)  
+
+## 6.2 简化射线-球体交汇代码
+让我们重新审视一下射线球体方程：
+
+```cpp
+double hit_sphere(const point3& center, double radius, const ray& r) {
+    vec3 oc = r.origin() - center;
+    auto a = dot(r.direction(), r.direction());
+    auto b = 2.0 * dot(oc, r.direction());
+    auto c = dot(oc, oc) - radius*radius;
+    auto discriminant = b*b - 4*a*c;
+
+    if (discriminant < 0) {
+        return -1.0;
+    } else {
+        return (-b - sqrt(discriminant) ) / (2.0*a);
+    }
+}
+```
+> [main.cc] Ray-sphere intersection code (before)
+
+首先，回顾一下，与自身点乘的向量等于该向量的平方长度。
+
+其次，注意`b`的方程中如何有一个2的因子。考虑一下，如果 $b=2h$，二次方程会发生什么:
+
+$$ \frac{−b± \sqrt{b^2−4ac}}{2a}$$
+$$ =\frac{−2h± \sqrt{(2h)^2−4ac}}{2a}$$
+$$ =\frac{−2h± 2\sqrt{h^2−ac}}{2a}$$
+$$ =\frac{−h± \sqrt{h^2−ac}}{a}$$
+
+利用这些观察，我们现在可以将球体相交的代码简化为这样:
+```cpp
+double hit_sphere(const point3& center, double radius, const ray& r) {
+    vec3 oc = r.origin() - center;
+    auto a = r.direction().length_squared();
+    auto half_b = dot(oc, r.direction());
+    auto c = oc.length_squared() - radius*radius;
+    auto discriminant = half_b*half_b - a*c;
+
+    if (discriminant < 0) {
+        return -1.0;
+    } else {
+        return (-half_b - sqrt(discriminant) ) / a;
+    }
+}
+```
+>[main.cc] Ray-sphere intersection code (after)
+
+<br/>
+
+## 6.3. 可击中对象的抽象
+现在，如果有多个球体会如何呢？虽然有一个球体数组是很诱人的，但一个非常干净的解决方案是为射线可能击中的任何东西建立一个 "抽象类"，并使球体和球体列表都只是你可以击中的东西。这个类应该叫什么是个难题--如果不是为了 "面向对象 "编程，叫它 "对象"也不错。
+
+"Surface"经常被使用，其弱点是也许我们会想要体积。"hittable"强调了将它们联合起来的成员函数。我不喜欢其中任何一个，但我会选择 "hittable"。
+
+这个hittable抽象类将有一个接收射线的hit函数。对大多数射线追踪器来说，为命中添加一个有效的区间$t_{min}$到$t_{max}$是很方便的，所以只有当$t_{min}<t<t_{max}$ 时，命中才 "算数"。
+
+对于初始射线来说，这是正的 $t$，但是正如我们将看到的，在代码中，有一个 $t_{min}$到$t_{max}$的区间可以帮助一些细节。一个设计上的问题是，是否要做一些事情，比如在我们撞到什么东西的时候计算法线。我们可能会在搜索过程中遇到更近的东西，而我们只需要最近的东西的法线。我将采用简单的解决方案，计算一束东西，并将其存储在某个结构中。
+
+这里是抽象类：
+```cpp
+#ifndef HITTABLE_H
+#define HITTABLE_H
+
+#include "ray.h"
+
+struct hit_record {
+    point3 p;
+    vec3 normal;
+    double t;
+};
+
+class hittable {
+    public:
+        virtual bool hit(const ray& r, double t_min, double t_max, hit_record& rec) const = 0;
+};
+
+#endif
+```
+>[hittable.h] The hittable class
+
+这是球体:
+```cpp
+#ifndef SPHERE_H
+#define SPHERE_H
+
+#include "hittable.h"
+#include "vec3.h"
+
+class sphere : public hittable {
+    public:
+        sphere() {}
+        sphere(point3 cen, double r) : center(cen), radius(r) {};
+
+        virtual bool hit(
+            const ray& r, double t_min, double t_max, hit_record& rec) const override;
+
+    public:
+        point3 center;
+        double radius;
+};
+
+bool sphere::hit(const ray& r, double t_min, double t_max, hit_record& rec) const {
+    vec3 oc = r.origin() - center;
+    auto a = r.direction().length_squared();
+    auto half_b = dot(oc, r.direction());
+    auto c = oc.length_squared() - radius*radius;
+
+    auto discriminant = half_b*half_b - a*c;
+    if (discriminant < 0) return false;
+    auto sqrtd = sqrt(discriminant);
+
+    // Find the nearest root that lies in the acceptable range.
+    auto root = (-half_b - sqrtd) / a;
+    if (root < t_min || t_max < root) {
+        root = (-half_b + sqrtd) / a;
+        if (root < t_min || t_max < root)
+            return false;
+    }
+
+    rec.t = root;
+    rec.p = r.at(rec.t);
+    rec.normal = (rec.p - center) / radius;
+
+    return true;
+}
+
+#endif
+```
+>[sphere.h] The sphere class
+
+## 6.4. 正面与反面的对比

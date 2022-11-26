@@ -3,31 +3,76 @@
 
 #include <iostream>
 
-int main()
-{
-    const int image_height = 256;
-    const int image_width = 256;
+#include "vector3.h"
+#include "color.h"
+#include "ray.h"
+auto sphereCenter = Point3(0, 0, -1);
 
+double hit_sphere(const Point3& center, double radius, const Ray& r) {
+    Vector3 oc = r.origin() - center;
+    auto a = r.direction().length_squared();
+    //auto b = 2.0 * dot(oc, r.direction());
+    auto harf_b = dot(oc, r.direction());
+
+    auto c = dot(oc, oc) - radius * radius;
+    auto discriminant = harf_b * harf_b - a * c;
+
+    if (discriminant < 0) {
+        return -1.0;
+    }
+    else {
+        //t小的 距离更近
+        return (-harf_b - sqrt(discriminant)) / a;
+    }
+}
+
+Color ray_color(const Ray& ray) {
+    auto t = hit_sphere(sphereCenter, 0.5, ray);
+    if (t > 0.0) {
+        Vector3 normal = unitVector3(ray.at(t) - sphereCenter);
+        return (normal += 1.0) * 0.5;
+    }
+    Vector3 unit_direction = unitVector3(ray.direction());
+    t = 0.5 * (unit_direction.y() + 1.0);
+    return (1.0 - t) * Color(1.0, 1.0, 1.0) + t * Color(0.5, 0.7, 1.0);
+}
+
+void writePPMImage() {
+    const auto aspect_ratio = 16.0 / 9.0;
+    const int image_width = 400;
+    const int image_height = static_cast<int>(image_width / aspect_ratio);
+
+    //视口平面距离原点（摄像机）的距离
+    auto focal_length = 1.0;
+    //原点（摄像机）
+    auto origin = Point3(0, 0, 0);
+    //视口定义
+    auto viewport_height = 2.0;
+    auto viewport_width = aspect_ratio * viewport_height;
+    auto horizontal = Vector3(viewport_width, 0, 0);
+    auto vertical = Vector3(0, viewport_height, 0);
+    //视口左下角
+    auto lower_left_corner_point= origin - horizontal / 2 - vertical / 2 - Vector3(0, 0, focal_length);
 
     //render
-
+    Color color = Color();
     std::cout << "P3\n" << image_width << ' ' << image_height << "\n255\n";
-
     for (int j = image_height - 1; j >= 0; --j) {
         std::cerr << "\rScanlines remaining: " << j << ' ' << std::flush;
         for (int i = 0; i < image_width; ++i) {
-            auto r = double(i) / (image_width - 1);
-            auto g = double(j) / (image_height - 1);
-            auto b = 1;
-            int ir = static_cast<int>(255.999 * r);
-            int ig = static_cast<int>(255.999 * g);
-            int ib = static_cast<int>(255.999 * b);
-            std::cout << ir << ' ' << ig << ' ' << ib << '\n';
+            auto u = double(i) / (image_width - 1);
+            auto v = double(j) / (image_height - 1);
+            Ray r(origin, lower_left_corner_point + u * horizontal + v * vertical - origin);
+            copyVec3(color, ray_color(r));
+            WriteColor(std::cout, color);
         }
     }
-
     std::cerr << "\nDone.\n";
-
+}
+int main()
+{
+    //
+    writePPMImage();
     return 0;
 }
 
