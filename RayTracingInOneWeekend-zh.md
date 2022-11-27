@@ -667,3 +667,594 @@ bool sphere::hit(const ray& r, double t_min, double t_max, hit_record& rec) cons
 >[sphere.h] The sphere class
 
 ## 6.4. 正面与反面的对比
+法线的第二个设计决定是它们是否应该总是指向外面。目前，发现的法线将总是沿着中心到交点的方向（法线指向外）。
+
+如果射线从外面与球体相交，法线就会指向射线。
+
+如果射线从内部与球体相交，则法线（总是指向外部）顺着射线。
+
+或者，我们也可以让法线始终指向射线。如果射线在球体外，法线将指向外侧，但如果射线在球体内，法线将指向内侧。
+
+![图 1](images/PossibleDirectionsForSphere.png)  
+>Possible directions for sphere surface-normal geometry
+
+我们需要在这些中选择一个，因为我们最终会想确定射线来自表面的哪一面。这对于每一面的渲染都不同的物体来说是很重要的，比如一张双面纸上的文字，或者对于有内部和外部的物体，比如玻璃球。
+
+如果我们决定让法线总是指向外面，那么我们就需要在给射线着色时确定它在哪一边。我们可以通过比较射线和法线来确定这一点。如果射线和法线的方向相同，那么射线就在物体内部，如果射线和法线的方向相反，那么射线就在物体外部。这可以通过取两个向量的点积来确定，如果它们的点积是正的，则射线在球体内部。
+```cpp
+if (dot(ray_direction, outward_normal) > 0.0) {
+    // ray is inside the sphere
+    ...
+} else {
+    // ray is outside the sphere
+    ...
+}
+```
+>Comparing the ray and the normal
+
+<br/>
+如果我们决定让法线总是指向射线，我们就不能用点积来确定射线在曲面的哪一边。相反，我们需要存储这些信息。
+
+
+```cpp
+bool front_face;
+if (dot(ray_direction, outward_normal) > 0.0) {
+    // ray is inside the sphere
+    normal = -outward_normal;
+    front_face = false;
+} else {
+    // ray is outside the sphere
+    normal = outward_normal;
+    front_face = true;
+}
+```
+>Remembering the side of the surface
+
+<br/>
+
+我们可以设置成法线总是指向曲面的 "外侧"，或者总是指向入射光线。这个决定取决于你是想在几何体相交时还是在着色时确定曲面的边。在本书中，我们有更多的材质类型，而不是几何体类型，所以我们会选择在几何体上进行判断，以减少工作量。这只是一个偏好的问题，你会在文献中看到两种实现方式。
+
+我们在`hit_record`结构中加入`front_face bool`。我们还将添加一个函数来为我们解决这个计算。
+
+```cpp
+struct hit_record {
+    point3 p;
+    vec3 normal;
+    double t;
+    bool front_face;
+
+    inline void set_face_normal(const ray& r, const vec3& outward_normal) {
+        front_face = dot(r.direction(), outward_normal) < 0;
+        normal = front_face ? outward_normal :-outward_normal;
+    }
+};
+```
+>[hittable.h] Adding front-face tracking to hit_record
+
+然后我们把表面的确定结果添加到类中。
+```cpp
+bool sphere::hit(const ray& r, double t_min, double t_max, hit_record& rec) const {
+    ...
+
+    rec.t = root;
+    rec.p = r.at(rec.t);
+    vec3 outward_normal = (rec.p - center) / radius;
+    rec.set_face_normal(r, outward_normal);
+
+    return true;
+}
+```
+
+>[sphere.h] The sphere class with normal determination
+
+##6.5. 可击中物体的列表
+
+我们有一个叫做hittable的通用对象，射线可以与之相交。我们现在添加一个类，用来存储一个hittable的列表：
+
+```cpp
+#ifndef HITTABLE_LIST_H
+#define HITTABLE_LIST_H
+
+#include "hittable.h"
+
+#include <memory>
+#include <vector>
+
+using std::shared_ptr;
+using std::make_shared;
+
+class hittable_list : public hittable {
+    public:
+        hittable_list() {}
+        hittable_list(shared_ptr<hittable> object) { add(object); }
+
+        void clear() { objects.clear(); }
+        void add(shared_ptr<hittable> object) { objects.push_back(object); }
+
+        virtual bool hit(
+            const ray& r, double t_min, double t_max, hit_record& rec) const override;
+
+    public:
+        std::vector<shared_ptr<hittable>> objects;
+};
+
+bool hittable_list::hit(const ray& r, double t_min, double t_max, hit_record& rec) const {
+    hit_record temp_rec;
+    bool hit_anything = false;
+    auto closest_so_far = t_max;
+
+    for (const auto& object : objects) {
+        if (object->hit(r, t_min, closest_so_far, temp_rec)) {
+            hit_anything = true;
+            closest_so_far = temp_rec.t;
+            rec = temp_rec;
+        }
+    }
+
+    return hit_anything;
+}
+
+#endif
+```
+>[hittable_list.h] The hittable_list class
+
+
+## 6.6. 一些新的C++特性
+`hittable_list`类的代码使用了两个C++特性，如果你通常不是C++程序员，可能会被绊倒：`vector`和`shared_ptr`。
+
+`shared_ptr<type>`是一个指向某种分配类型的指针，具有引用计数的语义。每当你把它的值赋给另一个共享指针（通常是用一个简单的赋值），引用计数就会增加。当共享指针超出范围时（比如在一个块或函数的末尾），引用计数被递减。一旦计数为零，该对象就被删除。
+
+通常情况下，共享指针首先用一个新分配的对象进行初始化，类似这样。
+```cpp
+shared_ptr<double> double_ptr = make_shared<double>(0.37);
+shared_ptr<vec3>   vec3_ptr   = make_shared<vec3>(1.414214, 2.718281, 1.618034);
+shared_ptr<sphere> sphere_ptr = make_shared<sphere>(point3(0,0,0), 1.0);
+```
+>一个使用shared_ptr的分配例子
+
+<br/>
+
+`make_shared<thing>(thing_constructor_params ...)` 使用构造函数参数分配一个新的 `thing` 类型实例。它返回一个 `shared_ptr<thing>`。
+
+由于类型可以通过 `make_shared<type>(...)` 的返回类型自动推导出来，上面几行可以使用 C++ 的自动类型指定器更简单地表达。
+
+```cpp
+auto double_ptr = make_shared<double>(0.37);
+auto vec3_ptr   = make_shared<vec3>(1.414214, 2.718281, 1.618034);
+auto sphere_ptr = make_shared<sphere>(point3(0,0,0), 1.0);
+```
+> 一个使用自动类型的shared_ptr的分配例子
+
+<br/>
+
+我们将在我们的代码中使用共享指针，因为它允许多个几何体共享一个共同的实例（例如，一群球体都使用相同的纹理贴图材料），并且因为它使内存管理自动化，更容易推理。
+
+`std::shared_ptr`被包含在`<memory>`头中。
+
+你可能不熟悉的第二个C++特性是`std::vector`。这是一个任意类型的类似数组的通用集合。上面，我们使用了一个指向`hittable`的集合。`std::vector`会随着更多值的加入而自动增长：`objects.push_back(object)`将一个值添加到`std::vector`成员变量`objects`的结尾。
+
+`std::vector`被包含在`<vector>`头文件中。
+
+最后，清单20中的using语句告诉编译器，我们将从std库中获得`shared_ptr和make_shared`，所以我们不需要每次引用它们时都用`std::`来预置这些。
+
+## 6.7. 常用常数和实用函数
+
+我们需要一些数学常数，我们在自己的头文件中方便地定义这些常数。现在我们只需要无穷大，但我们也会把我们自己对π的定义放在里面，我们以后会需要。圆周率没有标准的可移植定义，所以我们只是定义我们自己的常数。我们将在`rtweekend.h`，也就是我们的主头文件中抛出常用的有用常数和未来的实用函数。
+
+
+```cpp
+#ifndef RTWEEKEND_H
+#define RTWEEKEND_H
+
+#include <cmath>
+#include <limits>
+#include <memory>
+
+
+// Usings
+
+using std::shared_ptr;
+using std::make_shared;
+using std::sqrt;
+
+// Constants
+
+const double infinity = std::numeric_limits<double>::infinity();
+const double pi = 3.1415926535897932385;
+
+// Utility Functions
+
+inline double degrees_to_radians(double degrees) {
+    return degrees * pi / 180.0;
+}
+
+// Common Headers
+
+#include "ray.h"
+#include "vec3.h"
+
+#endif
+```
+>[rtweekend.h] The rtweekend.h common header
+
+<br/>
+
+
+然后是新的主函数main:
+```cpp
+#include "rtweekend.h"
+
+#include "color.h"
+#include "hittable_list.h"
+#include "sphere.h"
+
+#include <iostream>
+color ray_color(const ray& r, const hittable& world) {
+    hit_record rec;
+    if (world.hit(r, 0, infinity, rec)) {
+        return 0.5 * (rec.normal + color(1,1,1));
+    }
+    vec3 unit_direction = unit_vector(r.direction());
+    auto t = 0.5*(unit_direction.y() + 1.0);
+    return (1.0-t)*color(1.0, 1.0, 1.0) + t*color(0.5, 0.7, 1.0);
+}
+
+int main() {
+
+    // Image
+
+    const auto aspect_ratio = 16.0 / 9.0;
+    const int image_width = 400;
+    const int image_height = static_cast<int>(image_width / aspect_ratio);
+
+    // World
+    hittable_list world;
+    world.add(make_shared<sphere>(point3(0,0,-1), 0.5));
+    world.add(make_shared<sphere>(point3(0,-100.5,-1), 100));
+
+    // Camera
+
+    auto viewport_height = 2.0;
+    auto viewport_width = aspect_ratio * viewport_height;
+    auto focal_length = 1.0;
+
+    auto origin = point3(0, 0, 0);
+    auto horizontal = vec3(viewport_width, 0, 0);
+    auto vertical = vec3(0, viewport_height, 0);
+    auto lower_left_corner = origin - horizontal/2 - vertical/2 - vec3(0, 0, focal_length);
+
+    // Render
+
+    std::cout << "P3\n" << image_width << ' ' << image_height << "\n255\n";
+
+    for (int j = image_height-1; j >= 0; --j) {
+        std::cerr << "\rScanlines remaining: " << j << ' ' << std::flush;
+        for (int i = 0; i < image_width; ++i) {
+            auto u = double(i) / (image_width-1);
+            auto v = double(j) / (image_height-1);
+            ray r(origin, lower_left_corner + u*horizontal + v*vertical);
+            color pixel_color = ray_color(r, world);
+            write_color(std::cout, pixel_color);
+        }
+    }
+
+    std::cerr << "\nDone.\n";
+}
+```
+>Listing 24: [main.cc] 使用hittables的新的main函数
+
+<br/>
+
+
+这就产生了一张图片，实际上只是球体的位置和它们的表面法线的可视化。这通常是观察你的模型是否有缺陷和特点的一个好方法。
+
+
+# 7. 抗锯齿
+
+当真正的相机拍摄照片时，通常不会出现边缘锯齿，因为边缘像素是一些前景和一些背景的混合。我们可以通过对每个像素内的一堆样本进行平均化来获得同样的效果。我们不会去管分层的问题。这是有争议的，但对我的程序来说是通常的。对于某些光线追踪器来说，这很关键，但我们正在编写的这种一般的光线追踪器并没有从中受益，而且它使代码更难看。我们对相机类做了一些抽象，这样我们以后就可以做一个更酷的相机。
+
+## 7.1 一些随机数实用工具
+我们需要的一件事是一个返回实数的随机数发生器。我们需要一个函数来返回一个典型的随机数，按照惯例，该函数会返回一个范围为 $0≤r<1$ 的随机实数。 $1$ 前面的 "小于 "很重要，因为我们有时会利用这一点。
+
+一个简单的方法是使用`<cstdlib>`中的`rand()`函数。这个函数返回一个范围为`0`和`RAND_MAX`的随机整数。因此，我们可以通过添加到`rtweekend.h`中的以下代码片断，如愿得到一个真实的随机数。
+
+```cpp
+#include <cstdlib>
+...
+
+inline double random_double() {
+    // Returns a random real in [0,1).
+    return rand() / (RAND_MAX + 1.0);
+}
+
+inline double random_double(double min, double max) {
+    // Returns a random real in [min,max).
+    return min + (max-min)*random_double();
+}
+```
+>Listing 25: [rtweekend.h] random_double() functions
+
+<br/>
+
+
+传统上，C++没有标准的随机数生成器，但较新版本的C++已经通过`<random>`头解决了这个问题（尽管据一些专家说并不完美）。如果你想使用这个，你可以获得一个具有我们需要的条件的随机数，如下所示。
+
+```cpp
+#include <random>
+
+inline double random_double() {
+    static std::uniform_real_distribution<double> distribution(0.0, 1.0);
+    static std::mt19937 generator;
+    return distribution(generator);
+}
+```
+>Listing 26: [rtweekend.h] random_double(), alternate implemenation
+
+<br/>
+
+# 7.2. 用多个样本生成像素
+对于一个给定的像素，我们在该像素内有几个样本，并通过每个样本发送射线。然后对这些光线的颜色进行平均化。
+
+![图 2](images/PixelSamples.png)  
+
+现在是创建一个相机类的好时机，以管理我们的虚拟相机和相关的场景取样任务。下面的类使用之前的轴对齐相机实现了一个简单的相机。
+
+```cpp
+#ifndef CAMERA_H
+#define CAMERA_H
+
+#include "rtweekend.h"
+
+class camera {
+    public:
+        camera() {
+            auto aspect_ratio = 16.0 / 9.0;
+            auto viewport_height = 2.0;
+            auto viewport_width = aspect_ratio * viewport_height;
+            auto focal_length = 1.0;
+
+            origin = point3(0, 0, 0);
+            horizontal = vec3(viewport_width, 0.0, 0.0);
+            vertical = vec3(0.0, viewport_height, 0.0);
+            lower_left_corner = origin - horizontal/2 - vertical/2 - vec3(0, 0, focal_length);
+        }
+
+        ray get_ray(double u, double v) const {
+            return ray(origin, lower_left_corner + u*horizontal + v*vertical - origin);
+        }
+
+    private:
+        point3 origin;
+        point3 lower_left_corner;
+        vec3 horizontal;
+        vec3 vertical;
+};
+#endif
+```
+>Listing 27: [camera.h] The camera class
+
+<br/>
+
+为了`处理多采样`的颜色计算，我们将更新color中的`write_color()`函数。
+
+与其在每次积累更多的光照时加入一个小数贡献，不如在每次迭代时加入完整的颜色，然后在写出颜色时在最后进行一次除法（按样本数）。
+
+此外，我们将在`rtweekend.h`工具头中添加一个方便的实用函数： `clamp(x,min,max)`，它将值 `x` 控制在`[min,max]`范围内。
+
+```cpp
+inline double clamp(double x, double min, double max) {
+    if (x < min) return min;
+    if (x > max) return max;
+    return x;
+}
+```
+>Listing 28: [rtweekend.h] The clamp() utility function
+
+<br/>
+
+```cpp
+void write_color(std::ostream &out, color pixel_color, int samples_per_pixel) {
+    auto r = pixel_color.x();
+    auto g = pixel_color.y();
+    auto b = pixel_color.z();
+
+    // Divide the color by the number of samples.
+    auto scale = 1.0 / samples_per_pixel;
+    r *= scale;
+    g *= scale;
+    b *= scale;
+
+    // Write the translated [0,255] value of each color component.
+    out << static_cast<int>(256 * clamp(r, 0.0, 0.999)) << ' '
+        << static_cast<int>(256 * clamp(g, 0.0, 0.999)) << ' '
+        << static_cast<int>(256 * clamp(b, 0.0, 0.999)) << '\n';
+}
+```
+>Listing 29: [color.h] The multi-sample write_color() function
+
+<br/>
+
+main函数也改变了：
+```cpp
+#include "camera.h"
+
+...
+
+int main() {
+
+    // Image
+
+    const auto aspect_ratio = 16.0 / 9.0;
+    const int image_width = 400;
+    const int image_height = static_cast<int>(image_width / aspect_ratio);
+    const int samples_per_pixel = 100;
+
+    // World
+
+    hittable_list world;
+    world.add(make_shared<sphere>(point3(0,0,-1), 0.5));
+    world.add(make_shared<sphere>(point3(0,-100.5,-1), 100));
+
+    // Camera
+    camera cam;
+
+    // Render
+
+    std::cout << "P3\n" << image_width << " " << image_height << "\n255\n";
+
+    for (int j = image_height-1; j >= 0; --j) {
+        std::cerr << "\rScanlines remaining: " << j << ' ' << std::flush;
+        for (int i = 0; i < image_width; ++i) {
+            color pixel_color(0, 0, 0);
+            for (int s = 0; s < samples_per_pixel; ++s) {
+                auto u = (i + random_double()) / (image_width-1);
+                auto v = (j + random_double()) / (image_height-1);
+                ray r = cam.get_ray(u, v);
+                pixel_color += ray_color(r, world);
+            }
+            write_color(std::cout, pixel_color, samples_per_pixel);
+        }
+    }
+
+    std::cerr << "\nDone.\n";
+}
+```
+>Listing 30: [main.cc] Rendering with multi-sampled pixels
+
+<br/>
+
+放大产生的图像，我们可以看到边缘像素的差异。
+
+![Before and after antialiasing](images/beforeAndAfterAntialiasing.png)  
+
+
+# 8. 漫反射材质
+现在我们有了物体和每个像素的多条射线，我们可以制作一些看起来很真实的材质。我们将从漫反射（哑光）材质开始。有一个问题是，我们是混合匹配几何体和材质（所以我们可以将一个材质分配给多个球体，反之亦然），还是将几何体和材质紧密结合起来（这对于几何体和材质相连的程序对象来说可能很有用）。我们将采用分离的方式--这在大多数渲染器中是很常见的--但要注意到这个限制。
+
+
+
+## 8.1. 一个简单的漫反射材质
+不发光的漫射物体只是吸收了周围环境的颜色，但它们用自己固有的颜色对其进行调制。从漫射表面反射出来的光，其方向是随机的。因此，如果我们将三条光线送入两个漫反射表面之间的裂缝，它们将各自有不同的随机行为。
+
+![图 5](images/lightRayBounces.png)  
+
+它们也可能被吸收而不是反射。表面越黑，就越有可能被吸收。(这就是为什么它是黑暗的！）实际上，任何随机化方向的算法都会产生看起来是粗糙的表面。其中一个最简单的方法被证明对理想的漫反射表面是完全正确的。(我曾经作为一个懒惰的黑客来做的在数学上接近理想的兰伯斯。)
+
+(读者Vassillen Chizhov证明了这个懒惰的黑客确实只是一个懒惰的黑客，是不准确的）。理想Lambertian的正确表示方法并不费力，在本章的末尾会介绍）。
+
+有两个单位半径的球体与一个表面的命中点 $p$ 相切。这两个球体的中心分别是 $(P+n)$ 和 $(P-n)$，其中 $n$ 是表面的法线。中心在 $(P-n)$ 的球体被认为在曲面内，而中心在 $(P+n)$ 的球体被认为在曲面外。选择切线单位半径的球体，该球体与射线原点在曲面的同一侧。在这个单位半径的球体内选一个随机点 $S$，然后从命中点 $P$ 发送一条射线到随机点 $S$ （这就是矢量 $(S-P)$）。
+
+![图 6](images/GeneratingARandomDiffuseBounceRay.png)  
+
+我们需要一种方法在一个单位半径的球体中挑选一个随机点。我们将使用通常最简单的算法：拒绝法。首先，在单位立方体中挑选一个随机点，其中x、y和z都在-1到+1之间。如果这个点在球体之外，拒绝这个点，再试一次。
+
+
+```cpp
+class vec3 {
+  public:
+    ...
+    inline static vec3 random() {
+        return vec3(random_double(), random_double(), random_double());
+    }
+
+    inline static vec3 random(double min, double max) {
+        return vec3(random_double(min,max), random_double(min,max), random_double(min,max));
+    }
+}
+```
+>[vec3.h] vec3 random utility functions
+
+```cpp
+vec3 random_in_unit_sphere() {
+    while (true) {
+        auto p = vec3::random(-1,1);
+        if (p.length_squared() >= 1) continue;
+        return p;
+    }
+}
+```
+>[vec3.h] The random_in_unit_sphere() function
+
+<br/>
+
+然后更新`ray_color()`函数以使用新的随机方向发生器。
+
+```cpp
+color ray_color(const ray& r, const hittable& world) {
+    hit_record rec;
+
+    if (world.hit(r, 0, infinity, rec)) {
+        point3 target = rec.p + rec.normal + random_in_unit_sphere();
+        return 0.5 * ray_color(ray(rec.p, target - rec.p), world);
+    }
+
+    vec3 unit_direction = unit_vector(r.direction());
+    auto t = 0.5*(unit_direction.y() + 1.0);
+    return (1.0-t)*color(1.0, 1.0, 1.0) + t*color(0.5, 0.7, 1.0);
+}
+```
+
+>Listing 33: [main.cc] ray_color() using a random ray direction
+
+# 8.2. 限制子射线的数量
+这里潜伏着一个潜在的问题。请注意，ray_color函数是递归的。它什么时候会停止递归？当它未能击中任何东西时。然而，在某些情况下，这可能是一个很长的时间--长到足以让堆栈爆炸。为了防止这种情况，让我们限制最大的递归深度，在最大深度时不返回任何光线贡献。
+
+```cpp
+color ray_color(const ray& r, const hittable& world, int depth) {
+    hit_record rec;
+
+    // If we've exceeded the ray bounce limit, no more light is gathered.
+    if (depth <= 0)
+        return color(0,0,0);
+
+    if (world.hit(r, 0, infinity, rec)) {
+        point3 target = rec.p + rec.normal + random_in_unit_sphere();
+        return 0.5 * ray_color(ray(rec.p, target - rec.p), world, depth-1);
+    }
+
+    vec3 unit_direction = unit_vector(r.direction());
+    auto t = 0.5*(unit_direction.y() + 1.0);
+    return (1.0-t)*color(1.0, 1.0, 1.0) + t*color(0.5, 0.7, 1.0);
+}
+
+...
+
+int main() {
+
+    // Image
+
+    const auto aspect_ratio = 16.0 / 9.0;
+    const int image_width = 400;
+    const int image_height = static_cast<int>(image_width / aspect_ratio);
+    const int samples_per_pixel = 100;
+    const int max_depth = 50;
+    ...
+
+    // Render
+
+    std::cout << "P3\n" << image_width << " " << image_height << "\n255\n";
+
+    for (int j = image_height-1; j >= 0; --j) {
+        std::cerr << "\rScanlines remaining: " << j << ' ' << std::flush;
+        for (int i = 0; i < image_width; ++i) {
+            color pixel_color(0, 0, 0);
+            for (int s = 0; s < samples_per_pixel; ++s) {
+                auto u = (i + random_double()) / (image_width-1);
+                auto v = (j + random_double()) / (image_height-1);
+                ray r = cam.get_ray(u, v);
+                pixel_color += ray_color(r, world, max_depth);
+            }
+            write_color(std::cout, pixel_color, samples_per_pixel);
+        }
+    }
+
+    std::cerr << "\nDone.\n";
+}
+```
+
+>Listing 34: [main.cc] ray_color() with depth limiting
+
+最终：
+
+![图 7](images/FirstRenderOfDiffuseSphere.png)  
+
