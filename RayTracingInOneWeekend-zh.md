@@ -1258,3 +1258,162 @@ int main() {
 
 ![图 7](images/FirstRenderOfDiffuseSphere.png)  
 
+## 8.3. 使用伽玛校正以获得准确的色彩强度
+注意球体下面的阴影。这张图片非常暗，但我们的球体在每次反弹时只吸收一半的能量，所以它们是50%的反射器。如果你看不到阴影，不用担心，我们现在就可以解决这个问题。这些球体看起来应该很浅（在现实生活中，是浅灰色）。其原因是，几乎所有的图像查看器都假定图像是 "伽马校正 "的，这意味着0到1的值在被存储为字节之前有一些转换。这有很多很好的理由，但对于我们的目的来说，我们只需要注意到这一点。
+
+初步估计，我们可以使用 "gamma 2"，这意味着将颜色提高到 $1/gamma$ 的幂数，或者在我们的简单案例中是 $½$ ，也就是平方根。
+
+```cpp
+void write_color(std::ostream &out, color pixel_color, int samples_per_pixel) {
+    auto r = pixel_color.x();
+    auto g = pixel_color.y();
+    auto b = pixel_color.z();
+
+    // Divide the color by the number of samples and gamma-correct for gamma=2.0.
+    auto scale = 1.0 / samples_per_pixel;
+    r = sqrt(scale * r);
+    g = sqrt(scale * g);
+    b = sqrt(scale * b);
+
+    // Write the translated [0,255] value of each color component.
+    out << static_cast<int>(256 * clamp(r, 0.0, 0.999)) << ' '
+        << static_cast<int>(256 * clamp(g, 0.0, 0.999)) << ' '
+        << static_cast<int>(256 * clamp(b, 0.0, 0.999)) << '\n';
+}
+```
+
+> Listing 35: [color.h] write_color(), with gamma correction
+
+这产生了浅灰色，正如我们所希望的：
+
+![图 8](images/DiffuseSphereWithGammaCorrection.png)  
+
+
+## 8.4. 修复阴影痤疮
+
+这里面还有一个微妙的错误。
+
+一些反射光线不是在 $t=0$ 时击中它们所反射的物体，而是在 $t=-0.0000001$ 或 $t=0.00000001$ 或球体间隔给我们的任何浮点近似值。
+
+所以我们需要`忽略非常接近零的hit`。
+
+
+```cpp
+if (world.hit(r, 0.001, infinity, rec)) {
+```
+
+>Listing 36: [main.cc] Calculating reflected ray origins with tolerance
+
+这就摆脱了阴影痤疮问题。是的，它真的叫这个名字。
+
+## 8.5. 真正的兰伯斯反射
+
+这里提出的剔除方法在单位球中产生沿表面法线偏移的随机点。这相当于在半球上挑选出接近法线的高概率方向，而在掠过角度散射射线的概率较低。
+
+这种分布的尺度是 $cos^3(\phi)$，其中 $\phi$ 是与法线的角度。这很有用，因为以浅角到达的光线在更大的范围内传播，因此对最终颜色的贡献较低。
+
+然而，我们感兴趣的是Lambertian分布，它的分布是 $cos^3(\phi)$。真正的Lambertian对于接近正态的射线散射来说，其概率更高，但分布更均匀。这是通过在单位球体的表面上选取随机点，沿表面法线偏移来实现的。
+
+在单位球面上选取随机点可以通过在单位球面上选取随机点，然后将这些点归一化来实现。
+
+```cpp
+vec3 random_unit_vector() {
+    return unit_vector(random_in_unit_sphere());
+}
+```
+>Listing 37: [vec3.h] The random_unit_vector() function
+
+![图 9](images/GeneratingRandomUnitVector.png)  
+
+>生成一个随机的单位向量
+
+这个`random_unit_vector()`函数是现有的`random_in_unit_sphere()`函数的直接替换。
+
+```cpp
+color ray_color(const ray& r, const hittable& world, int depth) {
+    hit_record rec;
+
+    // If we've exceeded the ray bounce limit, no more light is gathered.
+    if (depth <= 0)
+        return color(0,0,0);
+
+    if (world.hit(r, 0.001, infinity, rec)) {
+        point3 target = rec.p + rec.normal + random_unit_vector();
+        return 0.5 * ray_color(ray(rec.p, target - rec.p), world, depth-1);
+    }
+
+    vec3 unit_direction = unit_vector(r.direction());
+    auto t = 0.5*(unit_direction.y() + 1.0);
+    return (1.0-t)*color(1.0, 1.0, 1.0) + t*color(0.5, 0.7, 1.0);
+}
+```
+>Listing 38: [main.cc] 替换漫反射的ray_color()
+
+渲染后，我们得到一个类似的图像， 阴影部位和原来比变淡了：
+
+![图 10](images/CorrectLambertion.png)  
+
+鉴于我们的两个球体的场景非常简单，很难说出这两种漫反射方法之间的区别，但你应该能够注意到两个重要的视觉差异。
+
+1. 改变后的阴影不那么明显了
+2. 改变后，两个球体的外观都变亮了
+
+这两种变化都是由于光线的散射更加均匀，向法线方向散射的光线更少。这意味着对于漫反射物体来说，它们会显得更亮，因为有更多的光线反弹到相机上。对于阴影来说，较少的光线直接向上反弹，所以大球体在小球体正下方的部分会更亮。
+
+## 8.6. 一种替代性的漫反射方案
+
+本书中介绍的最初的hack持续了很长时间，才被证明是对理想的兰伯斯漫反射的不正确的近似。这个错误持续了这么久的一个重要原因是，很难去：
+
+1. 从数学上证明概率分布是不正确的
+2. 直观地解释为什么 $cos(\phi)$ 分布是可取的（以及它看起来像什么）。
+
+
+并非很多常见的、日常的物体都是完全漫射的，所以我们对这些物体在光线下的行为的视觉直觉可能很差。
+
+为了便于学习，我们引入了一个直观的、易于理解的漫反射方法。对于上面的两种方法，我们有一个随机矢量，先是随机长度，然后是单位长度，从命中点偏移法线。为什么向量要被法线偏移，这可能不是很明显。
+
+一个更直观的方法是，在远离击中点的所有角度都有一个统一的散射方向，而不依赖于与法线的角度。许多最早的光线追踪论文都使用了这种漫射方法（在采用兰伯斯漫反射之前）。
+
+```cpp
+vec3 random_in_hemisphere(const vec3& normal) {
+    vec3 in_unit_sphere = random_in_unit_sphere();
+    if (dot(in_unit_sphere, normal) > 0.0) // In the same hemisphere as the normal
+        return in_unit_sphere;
+    else
+        return -in_unit_sphere;
+}
+```
+>Listing 39: [vec3.h] The random_in_hemisphere(normal) function
+
+将新的公式插入`ray_color()`函数中:
+
+```cpp
+color ray_color(const ray& r, const hittable& world, int depth) {
+    hit_record rec;
+
+    // If we've exceeded the ray bounce limit, no more light is gathered.
+    if (depth <= 0)
+        return color(0,0,0);
+
+    if (world.hit(r, 0.001, infinity, rec)) {
+        point3 target = rec.p + random_in_hemisphere(rec.normal);
+        return 0.5 * ray_color(ray(rec.p, target - rec.p), world, depth-1);
+    }
+
+    vec3 unit_direction = unit_vector(r.direction());
+    auto t = 0.5*(unit_direction.y() + 1.0);
+    return (1.0-t)*color(1.0, 1.0, 1.0) + t*color(0.5, 0.7, 1.0);
+}
+```
+>Listing 40: [main.cc] ray_color() with hemispherical scattering
+
+给了我们以下图像:
+![图 11](images/DiffuseHemisphereScattering.png)  
+>具有半球形散射的漫反射球体的渲染
+
+在本书的过程中，场景将变得更加复杂。我们鼓励你在这里介绍的不同漫反射渲染器之间进行切换。大多数感兴趣的场景都会包含过多的漫反射材料。通过了解不同漫反射方法对场景照明的影响，你可以获得宝贵的见解。
+
+
+# 9. 金属
+
+## 9.1 材质抽象类
