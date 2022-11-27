@@ -1417,3 +1417,220 @@ color ray_color(const ray& r, const hittable& world, int depth) {
 # 9. 金属
 
 ## 9.1 材质抽象类
+如果我们想让不同的对象有不同的材料，我们有一个设计决定。我们可以有一个具有很多参数的通用材料，不同的材料类型只是将其中的一些参数归零。这并不是一个坏的方法。或者我们可以有一个抽象的材料类来封装行为。我是后一种方法的粉丝。
+
+对于我们的程序，材料需要做两件事。
+
+1. 产生一条散射光线（或者说它吸收了入射光线）。
+2. 如果是散射的，就说该光线应该被衰减多少。
+
+这建议使用抽象类：
+
+```cpp
+#ifndef MATERIAL_H
+#define MATERIAL_H
+
+#include "rtweekend.h"
+
+struct hit_record;
+
+class material {
+    public:
+        virtual bool scatter(
+            const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered
+        ) const = 0;
+};
+
+#endif
+```
+>Listing 41: [material.h] The material class
+
+## 9.2. 描述光线与物体交汇处的数据结构
+
+`hit_record`是为了避免一堆参数，所以我们可以在里面塞进我们想要的任何信息。
+
+你可以用参数来代替；这是喜好问题。击中和材料需要相互认识，所以引用有一些循环性。在C++中，你只需要提醒编译器这个指针是指向一个类的，下面的可打击类中的 "材料类 "就做到了：
+
+```cpp
+#include "rtweekend.h"
+
+class material;
+
+struct hit_record {
+    point3 p;
+    vec3 normal;
+    shared_ptr<material> mat_ptr;
+    double t;
+    bool front_face;
+
+    inline void set_face_normal(const ray& r, const vec3& outward_normal) {
+        front_face = dot(r.direction(), outward_normal) < 0;
+        normal = front_face ? outward_normal :-outward_normal;
+    }
+};
+```
+>Listing 42: [hittable.h] Hit record with added material pointer
+
+我们在这里设置的是，材质将告诉我们射线与表面的交互方式。`hit_record`只是将一堆参数塞进一个结构中的一种方式，这样我们就可以将它们作为一个组来发送。当射线击中一个表面（例如一个特定的球体）时，`hit_record`中的材质指针将被设置为指向我们开始时在main()中设置的球体的材质指针。当`ray_color()`程序得到`hit_record`时，它可以调用材质指针的成员函数来找出散射的射线，如果有的话。
+
+为了实现这一点，我们必须有一个对我们球体类的材料的引用，以便在hit_record内返回。请看下面突出显示的几行：
+
+```cpp
+class sphere : public hittable {
+    public:
+        sphere() {}
+        //sphere(point3 cen, double r, shared_ptr<material> m)
+        //    : center(cen), radius(r), mat_ptr(m) {};
+
+        virtual bool hit(
+            const ray& r, double t_min, double t_max, hit_record& rec) const override;
+
+    public:
+        point3 center;
+        double radius;
+        //shared_ptr<material> mat_ptr;
+};
+
+bool sphere::hit(const ray& r, double t_min, double t_max, hit_record& rec) const {
+    ...
+
+    rec.t = root;
+    rec.p = r.at(rec.t);
+    vec3 outward_normal = (rec.p - center) / radius;
+    rec.set_face_normal(r, outward_normal);
+    //rec.mat_ptr = mat_ptr;
+
+    return true;
+}
+```
+
+>Listing 43: [sphere.h] 添加了材质信息的球射线检测
+
+## 9.3. 模拟光照散射和反射
+
+对于我们已经有的兰伯斯（漫射）情况，它可以始终散射并按其反射率 $R$ 衰减，或者它可以散射而不衰减，但吸收部分 $1-R$ 的射线，或者它可以是这些策略的混合。对于兰伯斯材质，我们得到这个简单的类别：
+
+```cpp
+class lambertian : public material {
+    public:
+        lambertian(const color& a) : albedo(a) {}
+
+        virtual bool scatter(
+            const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered
+        ) const override {
+            auto scatter_direction = rec.normal + random_unit_vector();
+            scattered = ray(rec.p, scatter_direction);
+            attenuation = albedo;
+            return true;
+        }
+
+    public:
+        color albedo;
+};
+```
+>[material.h] The lambertian material class
+
+请注意，我们也可以只用一些概率 $p$ 来散射，而让衰减成为 $albedo/p$ 。看你的选择。
+
+如果你仔细阅读上面的代码，你会注意到一个危害发生的小机会。
+
+如果我们生成的随机单位向量与法向量正好相反，那么这两个向量的总和将为零，这将导致散射方向向量为零。这将导致以后出现不好的情况（无穷大和NaN），所以我们需要在传递之前拦截这个条件。
+
+为了服务于此，我们将创建一个新的向量方法`vec3::near_zero()`如果向量在所有维度上都非常接近于零，则返回true。
+
+```cpp
+class vec3 {
+    ...
+    bool near_zero() const {
+        // Return true if the vector is close to zero in all dimensions.
+        const auto s = 1e-8;
+        return (fabs(e[0]) < s) && (fabs(e[1]) < s) && (fabs(e[2]) < s);
+    }
+    ...
+};
+```
+>Listing 45: [vec3.h] The vec3::near_zero() method
+
+```cpp
+class lambertian : public material {
+    public:
+        lambertian(const color& a) : albedo(a) {}
+
+        virtual bool scatter(
+            const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered
+        ) const override {
+            auto scatter_direction = rec.normal + random_unit_vector();
+
+            // Catch degenerate scatter direction
+            if (scatter_direction.near_zero())
+                scatter_direction = rec.normal;
+
+            scattered = ray(rec.p, scatter_direction);
+            attenuation = albedo;
+            return true;
+        }
+
+    public:
+        color albedo;
+};
+```
+>Listing 46: [material.h] Lambertian scatter, bullet-proof
+
+## 9.4. 镜面光线反射
+对于光滑的金属，射线不会随机散射。关键的数学问题是：射线是如何从金属镜面上反射出来的？向量数学是我们在这里的朋友。
+
+![图 12](images/RayReflection.png)  
+
+红色的反射光线方向是 $v+2b$。在我们的设计中，$n$ 是一个单位矢量，但 $v$ 可能不是。$b$ 的长度应该是 $v⋅n$。因为 $v$ 指向内侧，所以我们需要一个减号，得出。
+
+```cpp
+vec3 reflect(const vec3& v, const vec3& n) {
+    return v - 2*dot(v,n)*n;
+}
+```
+> [vec3.h] vec3 reflection function
+
+金属材质只是利用该公式反射射线：
+```cpp
+class metal : public material {
+    public:
+        metal(const color& a) : albedo(a) {}
+
+        virtual bool scatter(
+            const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered
+        ) const override {
+            vec3 reflected = reflect(unit_vector(r_in.direction()), rec.normal);
+            scattered = ray(rec.p, reflected);
+            attenuation = albedo;
+            return (dot(scattered.direction(), rec.normal) > 0);
+        }
+
+    public:
+        color albedo;
+};
+```
+>[material.h] Metal material with reflectance function
+
+我们需要修改ray_color()函数来使用它：
+
+```cpp
+color ray_color(const ray& r, const hittable& world, int depth) {
+    hit_record rec;
+
+    if (depth <= 0)
+        return color(0,0,0);
+
+    if (world.hit(r, 0.001, infinity, rec)) {
+        ray scattered;
+        color attenuation;
+        //if (rec.mat_ptr->scatter(r, rec, attenuation, scattered))
+        //    return attenuation * ray_color(scattered, world, depth-1);
+        //return color(0,0,0);
+    }
+
+    vec3 unit_direction = unit_vector(r.direction());
+    auto t = 0.5*(unit_direction.y() + 1.0);
+    return (1.0-t)*color(1.0, 1.0, 1.0) + t*color(0.5, 0.7, 1.0);
+}
+```
+>[main.cc] Ray color with scattered reflectance
