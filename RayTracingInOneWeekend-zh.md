@@ -1634,3 +1634,117 @@ color ray_color(const ray& r, const hittable& world, int depth) {
 }
 ```
 >[main.cc] Ray color with scattered reflectance
+
+##9.5. 有金属球体的场景
+现在让我们在我们的场景中添加一些金属球体：
+```cpp
+...
+
+// #include "material.h"
+
+...
+
+int main() {
+
+    // Image
+
+    const auto aspect_ratio = 16.0 / 9.0;
+    const int image_width = 400;
+    const int image_height = static_cast<int>(image_width / aspect_ratio);
+    const int samples_per_pixel = 100;
+    const int max_depth = 50;
+
+    // World
+
+    hittable_list world;
+
+    // auto material_ground = make_shared<lambertian>(color(0.8, 0.8, 0.0));
+    // auto material_center = make_shared<lambertian>(color(0.7, 0.3, 0.3));
+    // auto material_left   = make_shared<metal>(color(0.8, 0.8, 0.8));
+    // auto material_right  = make_shared<metal>(color(0.8, 0.6, 0.2));
+
+    // world.add(make_shared<sphere>(point3( 0.0, -100.5, -1.0), 100.0, material_ground));
+    // world.add(make_shared<sphere>(point3( 0.0,    0.0, -1.0),   0.5, material_center));
+    // world.add(make_shared<sphere>(point3(-1.0,    0.0, -1.0),   0.5, material_left));
+    // world.add(make_shared<sphere>(point3( 1.0,    0.0, -1.0),   0.5, material_right));
+
+    // Camera
+
+    camera cam;
+
+    // Render
+
+    std::cout << "P3\n" << image_width << " " << image_height << "\n255\n";
+
+    for (int j = image_height-1; j >= 0; --j) {
+        std::cerr << "\rScanlines remaining: " << j << ' ' << std::flush;
+        for (int i = 0; i < image_width; ++i) {
+            color pixel_color(0, 0, 0);
+            for (int s = 0; s < samples_per_pixel; ++s) {
+                auto u = (i + random_double()) / (image_width-1);
+                auto v = (j + random_double()) / (image_height-1);
+                ray r = cam.get_ray(u, v);
+                pixel_color += ray_color(r, world, max_depth);
+            }
+            write_color(std::cout, pixel_color, samples_per_pixel);
+        }
+    }
+
+    std::cerr << "\nDone.\n";
+}
+```
+>[main.cc] Scene with metal spheres
+
+最终得到：
+
+![图 13](images/ShinyMetal.png)  
+
+
+## 9.6. 模糊反射
+
+我们还可以通过使用一个小球并为射线选择一个新的端点来随机化反射方向。
+
+![图 14](images/GenerateFuzzedReflectionRay.png)  
+
+球体越大，反射就越模糊。这建议增加一个模糊性参数，它只是球体的半径（所以零是没有扰动的）。问题是，对于大球体或掠过的光线，我们可能会在表面以下散射。我们可以只让表面吸收这些。
+
+```cpp
+class metal : public material {
+    public:
+        //metal(const color& a, double f) : albedo(a), fuzz(f < 1 ? f : 1) {}
+
+        virtual bool scatter(
+            const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered
+        ) const override {
+            vec3 reflected = reflect(unit_vector(r_in.direction()), rec.normal);
+            //scattered = ray(rec.p, reflected + fuzz*random_in_unit_sphere());
+            attenuation = albedo;
+            return (dot(scattered.direction(), rec.normal) > 0);
+        }
+
+    public:
+        color albedo;
+        //double fuzz;
+};
+```
+>[material.h] Metal material fuzziness
+
+我们可以通过在金属中加入模糊度0.3和1.0来进行尝试。
+```cpp
+int main() {
+    ...
+    // World
+
+    auto material_ground = make_shared<lambertian>(color(0.8, 0.8, 0.0));
+    auto material_center = make_shared<lambertian>(color(0.7, 0.3, 0.3));
+    //auto material_left   = make_shared<metal>(color(0.8, 0.8, 0.8), 0.3);
+    //auto material_right  = make_shared<metal>(color(0.8, 0.6, 0.2), 1.0);
+    ...
+}
+```
+>[main.cc] Metal spheres with fuzziness
+![图 15](images/FuzzedMetal.png)  
+
+
+# 10. 介质
+透明材料，如水、玻璃和钻石是介质。当光线照射到它们时，它会分裂成一条反射光线和一条折射（透射）光线。我们将通过随机选择反射或折射来处理这个问题，并且每次互动只产生一条散射光线。
