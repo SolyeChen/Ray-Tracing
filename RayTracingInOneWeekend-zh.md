@@ -1779,8 +1779,55 @@ int main() {
 }
 ```
 >[main.cc] Metal spheres with fuzziness
+
+
 ![图 15](images/FuzzedMetal.png)  
 
 
 # 10. 介质
 透明材料，如水、玻璃和钻石是介质。当光线照射到它们时，它会分裂成一条反射光线和一条折射（透射）光线。我们将通过随机选择反射或折射来处理这个问题，并且每次互动只产生一条散射光线。
+
+## 10.1. 折射
+最难调试的部分是折射光线。如果有折射光线，我通常首先让所有的光折射。对于这个项目，我尝试在我们的场景中放置两个玻璃球，我得到了这个（我还没有告诉你如何正确或错误地做这个，但很快！）：
+
+
+那正确吗？玻璃球在现实生活中看起来很奇怪。但这是不对的。世界应该颠倒过来，没有奇怪的黑色东西。我只是打印出直接穿过图像中间的光线，这显然是错误的。这通常可以完成工作。
+
+## 10.2. 斯涅耳定律——折射定律
+折射是由斯涅耳定律描述的：
+
+$$ \eta · \sin\theta\ = \eta'·sin\theta'\$$
+
+其中，$\theta$ 和 $\theta'$ 是与法线的角度，$\eta$ 和 $\eta'$（读作 "eta "和 "eta prime"）是折射率（通常空气=1.0，玻璃=1.3-1.7，钻石=2.4）。
+
+几何图示如下：
+
+![RayRefraction](images/RayRefraction.png)  
+
+>光线反射
+
+为了确定折射光线的方向，我们必须求解 $\sin \theta'$
+
+$$ \sin \theta' = \frac{\eta}{\eta'} ·\sin\theta $$
+
+在表面的折射面有一条射线 $\bold{R'}$ 和法线 $\bold{n'}$, 并且他们之间存在一个角，$\theta'$, 我们可以将射线 $\bold{R'}$ 分成垂直于 $\bold{n'}$ 和平行于$\bold{n'}$ 的部分：
+
+$$ \bold{R'} = \bold{R'_\perp} + \bold{R'_\parallel}$$
+
+如果我们求解 $\bold{R'_\perp}$ 和 $\bold{R'_\parallel}$， 可以得到：
+
+$$ \bold{R'_\perp} = \frac{\eta}{\eta'}(\bold{R} + \cos \theta \bold{n})    $$
+
+$$ \bold{R'_\parallel} =  - \sqrt{1- {\vert \bold{R'_\perp} \vert}^2}   $$
+
+如果你愿意，你可以继续自己证明这一点，但我们会将其视为事实并继续前进。本书的其余部分将不需要您理解证明。
+
+我们仍然需要解决 $\cos \theta$ 。众所周知，两个向量的点积可以用它们之间夹角的余弦来解释：
+
+$$ \bold{a} ·\bold{b}  =  \vert a \vert \vert b \vert \cos \theta$$
+
+如果我们将 a,b限制为单位向量：
+$$ \bold{a} ·\bold{b} = \cos \theta$$
+
+我们现在可以根据已知量重写 $\bold{R'_\perp}$，
+$$ \bold{R'_\perp} = \frac{\eta}{\eta'}(\bold{R} + \cos \theta \bold{n})    $$
