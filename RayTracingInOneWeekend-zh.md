@@ -1824,10 +1824,10 @@ $$ \bold{R'_\parallel} =  - \sqrt{1- {\vert \bold{R'_\perp} \vert}^2}   $$
 
 我们仍然需要解决 $\cos \theta$ 。众所周知，两个向量的点积可以用它们之间夹角的余弦来解释：
 
-$$ \bold{a} ·\bold{b}  =  \vert a \vert \vert b \vert \cos \theta$$
+$$ \bold{a}·\bold{b}  =  \vert a \vert \vert b \vert \cos \theta$$
 
 如果我们将 a,b限制为单位向量：
-$$ \bold{a} ·\bold{b} = \cos \theta$$
+$$ \bold{a}·\bold{b} = \cos \theta$$
 
 我们现在可以根据已知量重写 $\bold{R'_\perp}$，
 $$ \bold{R'_\perp} = \frac{\eta}{\eta'}(\bold{R} + \cos \theta \bold{n})    $$

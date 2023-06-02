@@ -65,8 +65,8 @@ int main()
         for (int i = 0; i < image_width; ++i) {
             color pixel_color(0, 0, 0);
             for (int s = 0; s < samples_per_pixel; ++s) {
-                auto u = (i + random_double()) / (image_width - 1);
-                auto v = (j + random_double()) / (image_height - 1);
+                auto u = (i + random_double()) / (image_width - 1.0);
+                auto v = (j + random_double()) / (image_height - 1.0);
                 ray r = cam.get_ray(u, v);
                 pixel_color += ray_color(r, world, max_depth);
             }
@@ -74,7 +74,7 @@ int main()
         }
     }
     end = clock();
-    std::cerr << "\nDone. Cost(s): "<<(double)(end - begin)/ 1000 << "\n";
+    std::cerr << "\nDone. Cost(s): "<<((double)end - (double)begin)/ 1000 << "\n";
 
     return 0;
 }
