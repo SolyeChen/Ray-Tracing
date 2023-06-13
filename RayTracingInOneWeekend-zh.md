@@ -1831,3 +1831,71 @@ $$ \bold{a}·\bold{b} = \cos \theta$$
 
 我们现在可以根据已知量重写 $\bold{R'_\perp}$，
 $$ \bold{R'_\perp} = \frac{\eta}{\eta'}(\bold{R} + \cos \theta \bold{n})    $$
+
+当我们把它们重新组合在一起时，我们可以写一个函数来计算 $\bold{R'}$：
+
+```cpp
+vec3 refract(const vec3& uv, const vec3& n, double etai_over_etat) {
+    auto cos_theta = fmin(dot(-uv, n), 1.0);
+    vec3 r_out_perp = etai_over_etat * (uv + cos_theta*n);
+    vec3 r_out_parallel = -sqrt(fabs(1.0 - r_out_perp.length_squared())) * n;
+    return r_out_perp + r_out_parallel;
+}
+```
+> [vec3.h] 折射函数
+
+
+而总是折射的电介质材料是：
+
+```cpp
+class dielectric : public material {
+    public:
+    dielectric(double index_of_refraction) : ir(index_of_refraction) {}
+    virtual bool scatter(
+    const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered
+    ) const override {
+    attenuation = color(1.0, 1.0, 1.0);
+    double refraction_ratio = rec.front_face ? (1.0/ir) : ir;
+    vec3 unit_direction = unit_vector(r_in.direction());
+    vec3 refracted = refract(unit_direction, rec.normal, refraction_ratio);
+    scattered = ray(rec.p, refracted);
+    return true;
+    }
+    public:
+    double ir; // Index of Refraction
+};
+
+```
+
+> Listing 54: [material.h] Dielectric material class that always refracts
+
+
+现在我们将更新场景，把左边和中间的球体改为玻璃：
+
+```cpp
+auto material_ground = make_shared<lambertian>(color(0.8, 0.8, 0.0));
+auto material_center = make_shared<dielectric>(1.5);
+auto material_left = make_shared<dielectric>(1.5);
+auto material_right = make_shared<metal>(color(0.8, 0.6, 0.2), 1.0);
+
+```
+>Listing 55: [main.cc] Changing left and center spheres to glass
+
+然后重新编译运行，我们得到如下如片
+
+![img-1.14-glass-always-refract](images/img-1.14-glass-always-refract.png)  
+
+
+## 10.3. 全内反射（全反射）
+这看起来绝对不对。
+一个麻烦的实际问题是，当射线在具有较高折射率的材料中时，斯涅尔定律没有真正的解决方案，因此不可能有折射。
+高折射率的材料时，斯奈尔定律没有真正的解决方案，因此不可能有折射。如果
+我们回到斯涅尔定律和 $\sin\theta'$ 的推导：
+
+$$ \sin \theta' = \frac{\eta}{\eta'} ·\sin\theta $$
+
+如果射线ray在玻璃里面，外面是空气（$\eta=1.5$ and $\eta' = 1.0$）：
+
+$$ \sin \theta' = \frac{1.5}{1.0} ·\sin\theta $$
+
+
