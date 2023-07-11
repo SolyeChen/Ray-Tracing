@@ -1845,7 +1845,7 @@ vec3 refract(const vec3& uv, const vec3& n, double etai_over_etat) {
 > [vec3.h] 折射函数
 
 
-而总是折射的电介质材料是：
+而总是折射的电介质材料如下：
 
 ```cpp
 class dielectric : public material {
@@ -1887,10 +1887,11 @@ auto material_right = make_shared<metal>(color(0.8, 0.6, 0.2), 1.0);
 
 
 ## 10.3. 全内反射（全反射）
-这看起来绝对不对。
+这看起来绝对是不正确的。
+
 一个麻烦的实际问题是，当射线在具有较高折射率的材料中时，斯涅尔定律没有真正的解决方案，因此不可能有折射。
-高折射率的材料时，斯奈尔定律没有真正的解决方案，因此不可能有折射。如果
-我们回到斯涅尔定律和 $\sin\theta'$ 的推导：
+
+如果我们回到斯涅尔定律和$\sin\theta'$ 的推导：
 
 $$ \sin \theta' = \frac{\eta}{\eta'} ·\sin\theta $$
 
@@ -1898,4 +1899,173 @@ $$ \sin \theta' = \frac{\eta}{\eta'} ·\sin\theta $$
 
 $$ \sin \theta' = \frac{1.5}{1.0} ·\sin\theta $$
 
+$\sin \theta'$的值不可能大于1，因此如果
+$$ \frac{1.5}{1.0} ·\sin\theta >1.0 $$
+,
 
+方程两边的等式被打破了，不可能有解。如果解不存在，玻璃不能折射，因此必须反射光线：
+
+```cpp
+if (refraction_ratio * sin_theta > 1.0) {
+// Must Reflect
+...
+} else {
+// Can Refract
+...
+}
+
+```
+
+>Listing 56: [material.h] Determining if the ray can refract
+
+在这里，所有的光都被反射，因为在实践中，这通常是在固体物体内部，所以被称为“全内反射”。
+
+这就是为什么当你被淹没时，水-空气边界有时会像一面完美的镜子。
+
+我们可以使用三角性性质来求解sin_theta：
+
+
+$$sin\theta = \sqrt{1-cos^2\theta}$$
+
+和
+
+$$ cos\theta = \bold{R·n}$$
+
+```cpp
+double cos_theta = fmin(dot(-unit_direction, rec.normal), 1.0);
+double sin_theta = sqrt(1.0 - cos_theta*cos_theta);
+if (refraction_ratio * sin_theta > 1.0) {
+// Must Reflect
+...
+} else {
+// Can Refract
+...
+}
+
+```
+
+>Listing 57: [material.h] Determining if the ray can refract
+
+总是折射的介电材料（如果可能）是：
+
+```cpp
+class dielectric : public material {
+public:
+    dielectric(double index_of_refraction) : ir(index_of_refraction) {}
+
+    virtual bool scatter(
+        const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered
+    ) const override {
+        attenuation = color(1.0, 1.0, 1.0);
+        double refraction_ratio = rec.front_face ? (1.0 / ir) : ir;
+
+        vec3 unit_direction = unit_vector(r_in.direction());
+        double cos_theta = fmin(dot(-unit_direction, rec.normal), 1.0);
+        double sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+        bool cannot_refract = refraction_ratio * sin_theta > 1.0;
+        vec3 direction;
+        if (cannot_refract)
+            direction = reflect(unit_direction, rec.normal);
+        else
+            direction = refract(unit_direction, rec.normal, refraction_ratio);
+
+        scattered = ray(rec.p, direction);
+        return true;
+    }
+public:
+    double ir; // Index of Refraction
+};
+```
+
+衰减始终为 1 — 玻璃表面不吸收任何东西。 如果我们尝试使用这些参数：
+
+```cpp
+auto material_ground = make_shared<lambertian>(color(0.8, 0.8, 0.0));
+auto material_center = make_shared<lambertian>(color(0.1, 0.2, 0.5));
+auto material_left = make_shared<dielectric>(1.5);
+auto material_right = make_shared<metal>(color(0.8, 0.6, 0.2), 0.0);
+```
+>Listing 59: [main.cc] Scene with dielectric and shiny sphere
+
+
+我们得到如下图片：
+
+![img-1.15-glass-always-refract](images/img-1.15-glass-sometimes-refract.png)
+
+
+## 10.4. Schlick 近似
+现在，真正的玻璃具有随角度变化的反射率——以陡峭的角度看窗户，它就变成了一面镜子。 有一个丑陋的大方程式，但几乎每个人都使用 Christophe Schlick 提出的廉价且令人惊讶的精确多项式近似。 这产生了我们的全玻璃材料：
+
+```cpp
+class dielectric : public material {
+public:
+    dielectric(double index_of_refraction) : ir(index_of_refraction) {}
+
+    virtual bool scatter(
+        const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered
+    ) const override {
+        attenuation = color(1.0, 1.0, 1.0);
+        double refraction_ratio = rec.front_face ? (1.0 / ir) : ir;
+
+        vec3 unit_direction = unit_vector(r_in.direction());
+        double cos_theta = fmin(dot(-unit_direction, rec.normal), 1.0);
+        double sin_theta = sqrt(1.0 - cos_theta * cos_theta);
+        bool cannot_refract = refraction_ratio * sin_theta > 1.0;
+        vec3 direction;
+        if (cannot_refract || reflectance(cos_theta, refraction_ratio) > random_double())
+            direction = reflect(unit_direction, rec.normal);
+        else
+            direction = refract(unit_direction, rec.normal, refraction_ratio);
+
+        scattered = ray(rec.p, direction);
+        return true;
+    }
+public:
+    double ir; // Index of Refraction
+
+private:
+    static double reflectance(double cosine, double ref_idx) {
+        // Use Schlick's approximation for reflectance.
+        auto r0 = (1 - ref_idx) / (1 + ref_idx);
+        r0 = r0 * r0;
+        return r0 + (1 - r0) * pow((1 - cosine), 5);
+    }
+};
+```
+
+>Listing 60: [material.h] Full glass material
+
+#10.5. 建模一个空心玻璃球
+
+介电球的一个有趣且简单的技巧是注意，如果使用负半径，几何形状不受影响，但表面法线指向内。 这可以用作气泡来制作空心玻璃球：
+
+```cpp
+world.add(make_shared<sphere>(point3( 0.0, -100.5, -1.0), 100.0, material_ground));
+world.add(make_shared<sphere>(point3( 0.0, 0.0, -1.0), 0.5, material_center));
+world.add(make_shared<sphere>(point3(-1.0, 0.0, -1.0), 0.5, material_left));
+world.add(make_shared<sphere>(point3(-1.0, 0.0, -1.0), -0.4, material_left));
+world.add(make_shared<sphere>(point3( 1.0, 0.0, -1.0), 0.5, material_right));
+```
+
+>Listing 61: [main.cc] Scene with hollow glass sphere
+
+
+这给出：
+
+![Image 16: A hollow glass sphere](images/img-1.16-glass-hollow.png)
+
+
+# 11. 可定位相机
+
+
+相机就像电介质一样，调试起来很痛苦。 所以我总是逐步发展我自己的。 首先，让我们允许调整视野 (fov)。 这是你通过传送门看到的角度。 由于我们的图像不是正方形，因此水平和垂直方向的视场不同。 我总是使用垂直视角。 我通常还以度数指定它，并在构造函数内更改为弧度 - 这是个人品味的问题。
+
+## 11.1. 相机观察几何
+
+我首先保持光线从原点射向 $z= -1$ 平面。 我们可以把它变成 $z = -2$平面，或者其他任何东西，只要我们使得 $h$ 与该距离成比例即可。 
+
+这是我们的设置：
+
+![Figure 14: Camera viewing geometry](images/fig-1.14-cam-view-geom.jpg)
+
+这意味着$h = tan(\frac{\theta}{2} )$，我们的相机将会变成：

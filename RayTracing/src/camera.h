@@ -3,11 +3,17 @@
 
 class camera {
 public:
-    camera() {
+    camera(
+        double vfov,
+        double aspect_ratio
+    ) {
+        auto theta = degrees_to_radians(vfov);
+        auto h = tan(theta/2);
+        
         //视口定义
-        auto aspect_ratio = 16.0 / 9.0;
-        auto viewport_height = 2.0;
+        auto viewport_height = 2.0 * h;
         auto viewport_width = aspect_ratio * viewport_height;
+
         auto focal_length = 1.0;
 
         //原点（摄像机）
