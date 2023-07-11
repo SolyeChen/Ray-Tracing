@@ -1,3 +1,9 @@
+# Custom
+/RayTracing/.vs
+/RayTracing/bin
+/RayTracing/intermediate
+
+
 # Prerequisites
 *.d
 
@@ -30,6 +36,4 @@
 *.exe
 *.out
 *.app
-/RayTracing/x64
-/RayTracing/.vs
 

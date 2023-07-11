@@ -4,7 +4,7 @@
 #include "ray.h"
 #include "hittable.h"
 
-
+//material base class 
 class material {
 public:
     virtual bool scatter(
@@ -12,6 +12,7 @@ public:
     ) const = 0;
 };
 
+//lambert gradiant
 class lambertian : public material {
 public:
     lambertian(const color& a) : albedo(a) {}
@@ -51,6 +52,7 @@ public:
     double fuzzed;
 };
 
+//介质（电解质）
 class dielectric : public material {
 public:
     dielectric(double index_of_refraction) : ir(index_of_refraction) {}
