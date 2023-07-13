@@ -2133,4 +2133,113 @@ private:
 ![fig-1.16-cam-view-up.jpg](images/fig-1.16-cam-view-up.jpg)
 > Figure 16: Camera view up direction
 
-请记住，vup、v 和 w 都在同一平面上。 请注意，就像之前我们的固定相机面向 -Z 一样，我们的任意视图相机面向 -w。 请记住，我们可以（但不必）使用 world up (0, 1, 0)来指定 vup。 这很方便，并且自然会保持相机水平，直到您决定尝试疯狂的相机角度。
+请记住，vup、v 和 w 都在同一平面上。 请注意，就像之前我们的固定相机面向 -Z 一样，我们的任意视图相机面向 -w。 请记住，我们可以（但不是必须）使用 world up (0, 1, 0)来指定 vup。 这很方便，并且会保持相机和世界视角的自然水平，直到您决定尝试疯狂的相机角度。
+
+```cpp
+class camera {
+public:
+    camera(
+        point3 lookfrom,
+        point3 lookat,
+        vec3 vup,
+        double vfov, // vertical field-of-view in degrees
+        double aspect_ratio
+    ) {
+        auto theta = degrees_to_radians(vfov);
+        auto h = tan(theta / 2);
+        auto viewport_height = 2.0 * h;
+        auto viewport_width = aspect_ratio * viewport_height;
+        auto w = unit_vector(lookfrom - lookat);
+        auto u = unit_vector(cross(vup, w));
+        auto v = cross(w, u);
+        origin = lookfrom;
+        horizontal = viewport_width * u;
+        vertical = viewport_height * v;
+        lower_left_corner = origin - horizontal / 2 - vertical / 2 - w;
+    }
+    ray get_ray(double s, double t) const {
+        return ray(origin, lower_left_corner + s * horizontal + t * vertical - origin);
+    }
+private:
+    point3 origin;
+    point3 lower_left_corner;
+    vec3 horizontal;
+    vec3 vertical;
+};
+```
+
+> Listing 64: [camera.h] Positionable and orientable camera
+
+
+
+我们将会变回到原来的场景，然后使用新的视角：
+```cpp
+hittable_list world;
+
+auto material_ground = make_shared<lambertian>(color(0.8, 0.8, 0.0));
+auto material_center = make_shared<lambertian>(color(0.1, 0.2, 0.5));
+auto material_left = make_shared<dielectric>(1.5);
+auto material_right = make_shared<metal>(color(0.8, 0.6, 0.2), 0.0);
+
+world.add(make_shared<sphere>(point3( 0.0, -100.5, -1.0), 100.0, material_ground));
+world.add(make_shared<sphere>(point3( 0.0, 0.0, -1.0), 0.5, material_center));
+world.add(make_shared<sphere>(point3(-1.0, 0.0, -1.0), 0.5, material_left));
+world.add(make_shared<sphere>(point3(-1.0, 0.0, -1.0), -0.45, material_left));
+world.add(make_shared<sphere>(point3( 1.0, 0.0, -1.0), 0.5, material_right));
+camera cam(point3(-2,2,1), point3(0,0,-1), vec3(0,1,0), 90, aspect_ratio);
+```
+
+>Listing 65: [main.cc] Scene with alternate viewpoint
+
+得到：
+
+![img-1.18-view-distant.png](images/img-1.18-view-distant.png)
+>Image 18: A distant view
+
+我们也可以改变视野：
+
+```cpp
+camera cam(point3(-2,2,1), point3(0,0,-1), vec3(0,1,0), 20, aspect_ratio);
+```
+
+>Listing 66: [main.cc] Change field of view
+
+得到：
+
+![img-1.19-view-zoom.png](images/img-1.19-view-zoom.png)
+
+>Image 19: Zooming in
+
+
+
+# 12. Defocus Blur(散焦模糊)
+
+现在我们的最后一个功能：散焦模糊。 请注意，所有摄影师都会将其称为“景深”，因此请注意仅在朋友之间使用“散焦模糊”。
+我们在真实相机中散焦模糊的原因是因为它们需要一个大孔（而不仅仅是针孔）来收集光线。 这会使所有东西都散焦，但是如果我们将镜头贴到孔上，就会有一段距离让所有东西都聚焦。 您可以这样考虑镜头：来自焦距处特定点并到达镜头的所有光线将被弯曲回图像传感器上的单个点。
+
+我们将投影点与所有物体完美对焦的平面之间的距离称为焦距。 请注意，焦距与焦长不同——焦距是投影点与像平面之间的距离。
+
+在物理相机中，焦距由镜头和胶片/传感器之间的距离控制。这就是为什么当您改变焦点时，您会看到镜头相对于相机移动（这也可能发生在手机相机中，但传感器移动）。 “光圈”是一个有效控制镜头大小的孔。 对于真正的相机，如果您需要更多的光线，则可以将光圈设置得更大，并且会获得更多的散焦模糊。 对于我们的虚拟相机，我们可以拥有完美的传感器，并且永远不需要更多的光线，因此当我们想要散焦模糊时，我们只有光圈。
+
+## 12.1. 薄透镜近似法
+
+真正的相机有一个复杂的复合镜头。对于我们的代码，我们可以模拟顺序：传感器，然后镜头，然后光圈。然后我们可以找出将光线发送到哪里，并在计算后翻转图像（图像上下颠倒地投影在胶片上）。
+
+然而，图形人员通常使用薄透镜近似：
+
+
+![fig-1.17-cam-lens.jpg](images/fig-1.17-cam-lens.jpg)
+>Figure 17: Camera lens model
+
+我们不需要模拟相机的任何内部。为了在相机之外渲染图像，这会带来不必要的复杂性。相反，我通常从镜头发出光线，并将它们发送到焦平面（远离镜头的 focus_dist），该平面上的所有内容都处于完美对焦状态。
+
+![fig-1.18-cam-film-plane.jpg](images/fig-1.18-cam-film-plane.jpg)
+>Figure 18: Camera focus plane
+
+
+## 12.2. 生成采样射线
+通常，所有场景光线均源自lookfrom观察点。为了实现散焦模糊，请生成源自以lookfrom观察点为中心的圆盘内部的随机场景光线。半径越大，散焦模糊程度越大。您可以将我们的原始相机视为具有半径为零的散焦盘（根本没有模糊），因此所有光线都源自盘中心（lookfrom）。
+
+
+
+>Listing 67: [vec3.h] Generate random point inside unit disk
