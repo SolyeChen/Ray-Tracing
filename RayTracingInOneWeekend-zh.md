@@ -2057,15 +2057,80 @@ world.add(make_shared<sphere>(point3( 1.0, 0.0, -1.0), 0.5, material_right));
 
 # 11. 可定位相机
 
-
 相机就像电介质一样，调试起来很痛苦。 所以我总是逐步发展我自己的。 首先，让我们允许调整视野 (fov)。 这是你通过传送门看到的角度。 由于我们的图像不是正方形，因此水平和垂直方向的视场不同。 我总是使用垂直视角。 我通常还以度数指定它，并在构造函数内更改为弧度 - 这是个人品味的问题。
+
+
+![3 kind of fov](images/3kindoffov.webp)
 
 ## 11.1. 相机观察几何
 
-我首先保持光线从原点射向 $z= -1$ 平面。 我们可以把它变成 $z = -2$平面，或者其他任何东西，只要我们使得 $h$ 与该距离成比例即可。 
+我首先保持光线从原点射向 $z= -1$ 平面。 我们可以把它改为 $z = -2$平面，或者其他任何东西，只要我们使得 $h$ 与该距离成比例即可。 
 
 这是我们的设置：
+
 
 ![Figure 14: Camera viewing geometry](images/fig-1.14-cam-view-geom.jpg)
 
 这意味着$h = tan(\frac{\theta}{2} )$，我们的相机将会变成：
+
+```cpp
+class camera {
+public:
+    camera(
+        double vfov, //垂直 fov 角度
+        double aspect_ratio
+    ) {
+        auto theta = degrees_to_radians(vfov);
+        auto h = tan(theta/2);
+        
+        //视口定义
+        auto viewport_height = 2.0 * h;
+        auto viewport_width = aspect_ratio * viewport_height;
+
+        auto focal_length = 1.0;
+
+        //原点（摄像机）
+        origin = point3(0, 0, 0);
+        horizontal = vec3(viewport_width, 0.0, 0.0);
+        vertical = vec3(0.0, viewport_height, 0.0);
+
+        //视口左下角
+        lower_left_corner = origin - horizontal / 2 - vertical / 2 - vec3(0, 0, focal_length);
+    }
+
+    ray get_ray(double u, double v) const {
+        return ray(origin, lower_left_corner + u * horizontal + v * vertical - origin);
+    }
+
+private:
+    point3 origin;
+    point3 lower_left_corner;
+    vec3 horizontal;
+    vec3 vertical;
+};
+```
+>Listing 62: [camera.h] Camera with adjustable field-of-view (fov)
+
+
+当按照这样`camera cam(90, aspect_ratio)`调用并且球体如下：
+
+![img-1.17-wide-view.png](images/img-1.17-wide-view.png)
+
+
+
+## 11.2. 定位和定向相机（相机的定位和定向）
+为了获得任意的观点，让我们首先指出并命名我们关心的点。 我们将放置相机的位置称为“lookfrom”，将观察的点称为“lookat”。 （如果您想，您可以定义要查看的方向而不是要查看的点）
+
+
+![fig-1.15-cam-view-dir.jpg](images/fig-1.15-cam-view-dir.jpg)
+
+> Figure 15: Camera view direction
+
+
+
+实际上，我们可以使用任何我们想要的向上向量，只需将其投影到这个平面上即可获得相机的向上向量。 我使用通用约定命名一个“view up”(vup) 向量。 通过几个叉积，我们现在有了完整的正交基础来描述相机的方向。
+
+![fig-1.16-cam-view-up.jpg](images/fig-1.16-cam-view-up.jpg)
+> Figure 16: Camera view up direction
+
+请记住，vup、v 和 w 都在同一平面上。 请注意，就像之前我们的固定相机面向 -Z 一样，我们的任意视图相机面向 -w。 请记住，我们可以（但不必）使用 world up (0, 1, 0)来指定 vup。 这很方便，并且自然会保持相机水平，直到您决定尝试疯狂的相机角度。
