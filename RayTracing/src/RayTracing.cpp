@@ -9,15 +9,59 @@
 #include "sphere.h"
 #include "camera.h"
 #include "material.h"
+
+#include <functional>
+#include <vector>
+#include <thread>
+#include <mutex>
+#include <iomanip>
+std::mutex progressMutex;
+
+
+void processTaskComplete(int& ct, int totalTasks) {
+    // 模拟任务处理
+    // ...
+
+    // 完成一个任务，更新进度
+    std::lock_guard<std::mutex> lock(progressMutex);
+    ct++;
+}
+
+bool progressStop = false;
+void updateProgressThread(clock_t start, int& completeTasks, int totalTasks) {
+    while (!progressStop)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        int ctn = completeTasks;
+        if (ctn == 0)
+        {
+            ctn = 1;
+        }
+
+        if (ctn == totalTasks)
+        {
+            progressStop = true;
+            break;
+        }
+        clock_t ct = clock();
+        float progress = (float)(ctn) / totalTasks * 100;
+
+        int dt = ((double)ct - (double)start) / 1000;
+        std::cerr << "\r已花费时间: " << dt << "s; ";
+        std::cerr << "预计总时间: " << dt * totalTasks / ctn << "s; " ;
+        std::cerr << "处理进度: " << progress << "%"  << std::flush;
+    }
+}
+
 auto sphereCenter = point3(0, 0, -1);
 
 color ray_color(const ray& r, const hittable& world, int depth) {
-    hit_record rec;
-    // 如果我们已经超过了射线反弹的极限，就不会再聚集更多的光线。
+    // 如果已经超过了定义的射线反弹次数，就不会再聚集更多的光线。
     if (depth <= 0)
         return color(0, 0, 0);
 
-    if (world.hit(r, 0.001, infinity,  rec)) {
+    hit_record rec;
+    if (world.hit(r, 0.001, infinity, rec)) {
         ray scattered;
         color attenuation;
         if (rec.mat_ptr->scatter(r, rec, attenuation, scattered))
@@ -71,31 +115,23 @@ hittable_list random_scene() {
     return world;
 }
 
-
-int main()
+int main(int argc, char* argv[])
 {
-
     clock_t begin, end;
     begin = clock();
 
     // Image
     const auto aspect_ratio = 16.0 / 9.0;
-    const int image_width = 400;
+    const int image_width = 1080;
     const int image_height = static_cast<int>(image_width / aspect_ratio);
-    const int samples_per_pixel = 100;
+    const int samples_per_pixel = 500;
     const int max_depth = 50;
+
     // World
 
     //45
     auto R = cos(pi / 4);
     hittable_list world;
-
-    //auto material_left = make_shared<lambertian>(color(0.0, 0.0, 1.0));
-    //auto material_right = make_shared<lambertian>(color(1.0, 0.0, 0.0));
-
-    //world.add(make_shared<sphere>(point3(R, 0.0, -1.0), R, material_left));
-    //world.add(make_shared<sphere>(point3(-R, 0.0, -1.0), -R, material_right));
-
 
     auto material_ground = make_shared<lambertian>(color(0.8, 0.8, 0.0));
     auto material_center = make_shared<lambertian>(color(0.1, 0.2, 0.5));
@@ -105,40 +141,59 @@ int main()
     world.add(make_shared<sphere>(point3(0.0, -100.5, -1.0), 100.0, material_ground));
     world.add(make_shared<sphere>(point3(0.0, 0.0, -1.0), 0.5, material_center));
 
-
     world.add(make_shared<sphere>(point3(-1.0, 0.0, -1.0), 0.5, material_left));
     world.add(make_shared<sphere>(point3(-1.0, 0.0, -1.0), -0.4, material_left));
     world.add(make_shared<sphere>(point3(1.0, 0.0, -1.0), 0.5, material_right));
-    
-    
+
+
     // Camrea
 
-    point3 cameraStandPos(3, 3, 1);
-    point3 cameraFocusPos(0, 0, -1);
+    point3 cameraStandPos(13, 2, 3);
+    point3 cameraFocusPos(0, 0, 0);
     vec3 worldUp(0, 1, 0);
     auto vfov = 20;
 
-    auto aperture = 2.0;
-    auto dist_to_focus = (cameraStandPos - cameraFocusPos).length();
+    auto aperture = 0;
+    auto dist_to_focus = 10;
     camera cam(cameraStandPos, cameraFocusPos, worldUp, vfov, aspect_ratio, aperture, dist_to_focus);
 
-    // Render
-    std::cout << "P3\n" << image_width << ' ' << image_height << "\n255\n";
-    for (int j = image_height - 1; j >= 0; --j) {
-        std::cerr << "\rScanlines remaining: " << j << ' ' << std::flush;
-        for (int i = 0; i < image_width; ++i) {
-            color pixel_color(0, 0, 0);
-            for (int s = 0; s < samples_per_pixel; ++s) {
-                auto u = (i + random_double()) / (image_width - 1.0);
-                auto v = (j + random_double()) / (image_height - 1.0);
-                ray r = cam.get_ray(u, v);
-                pixel_color += ray_color(r, world, max_depth);
+    hittable_list randomWorld = random_scene();
+    std::vector<uint8_t> image(image_width * image_height * 3);
+
+    int completeTasks = 0;
+    int totalTasks = image_height * image_width;
+
+    std::thread progressThread(updateProgressThread, begin, std::ref(completeTasks), totalTasks);
+
+    const int k_threads = std::thread::hardware_concurrency();
+    std::vector<std::thread> threads(k_threads);
+    for (int threadId = 0; threadId < k_threads; ++threadId) {
+        threads[threadId] = std::thread(std::bind([&](int start, int end, int t) {
+            for (int j = start; j < end; j++) {
+                for (int i = 0; i < image_width; i++) {
+                    color col(0, 0, 0);
+                    for (int s = 0; s < samples_per_pixel; s++) {
+                        float u = float(i + random_double()) / float(image_width);
+                        float v = float(j + random_double()) / float(image_height);
+                        ray r = cam.get_ray(u, v);
+                        col += ray_color(r, randomWorld, max_depth);
+                    }
+                    write_color(&image[0], 3 * (j * image_width + i), col, samples_per_pixel);
+                    processTaskComplete(std::ref(completeTasks), totalTasks);
+                }
             }
-            write_color(std::cout, pixel_color, samples_per_pixel);
-        }
+            }, threadId* image_height / k_threads, (threadId + 1) == k_threads ? image_height : (threadId + 1) * image_height / k_threads, threadId));
     }
+
+    progressThread.join();
+    for (int t = 0; t < k_threads; ++t) {
+        threads[t].join();
+    }
+
+    write_image(&image[0], image_width, image_height);
+
     end = clock();
-    std::cerr << "\nDone. Cost(s): "<<((double)end - (double)begin)/ 1000 << "\n";
+    std::cerr << "\nDone. Cost(s): " << ((double)end - (double)begin) / 1000 << "\n";
 
     return 0;
 }

@@ -8,17 +8,17 @@
 class material {
 public:
     virtual bool scatter(
-        const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered
+        const ray& r_in, const hit_record& rec, vec3& attenuation, ray& scattered
     ) const = 0;
 };
 
 //lambert gradiant
 class lambertian : public material {
 public:
-    lambertian(const color& a) : albedo(a) {}
+    lambertian(const vec3& a) : albedo(a) {}
 
     virtual bool scatter(
-        const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered
+        const ray& r_in, const hit_record& rec, vec3& attenuation, ray& scattered
     ) const override {
         auto scatter_direction = rec.normal + random_unit_vector();
 
@@ -32,15 +32,15 @@ public:
     }
 
 public:
-    color albedo;
+    vec3 albedo;
 };
 
 class metal : public material {
 public:
-    metal(const color& a, double f) : albedo(a), fuzzed(f < 1 ? f : 1) {}
+    metal(const vec3& a, double f) : albedo(a), fuzzed(f < 1 ? f : 1) {}
 
     virtual bool scatter(
-        const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered
+        const ray& r_in, const hit_record& rec, vec3& attenuation, ray& scattered
     ) const override {
         vec3 reflected = reflect(unit_vector(r_in.direction()), rec.normal);
         scattered = ray(rec.p, reflected + fuzzed * random_in_unit_sphere());
@@ -48,7 +48,7 @@ public:
         return (dot(scattered.direction(), rec.normal) > 0);
     }
 public:
-    color albedo;
+    vec3 albedo;
     double fuzzed;
 };
 
@@ -58,9 +58,9 @@ public:
     dielectric(double index_of_refraction) : ir(index_of_refraction) {}
 
     virtual bool scatter(
-        const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered
+        const ray& r_in, const hit_record& rec, vec3& attenuation, ray& scattered
     ) const override {
-        attenuation = color(1.0, 1.0, 1.0);
+        attenuation = vec3(1.0, 1.0, 1.0);
         double refraction_ratio = rec.front_face ? (1.0 / ir) : ir;
 
         vec3 unit_direction = unit_vector(r_in.direction());

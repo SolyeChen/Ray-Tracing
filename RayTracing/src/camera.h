@@ -1,51 +1,59 @@
-#pragma once
-#include "rtweekend.h"
+#ifndef CAMERAH
+#define CAMERAH
+//==================================================================================================
+// Written in 2016 by Peter Shirley <ptrshrl@gmail.com>
+//
+// To the extent possible under law, the author(s) have dedicated all copyright and related and
+// neighboring rights to this software to the public domain worldwide. This software is distributed
+// without any warranty.
+//
+// You should have received a copy (see file COPYING.txt) of the CC0 Public Domain Dedication along
+// with this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
+//==================================================================================================
+
+#include "ray.h"
 
 class camera {
 public:
-    camera(
-        point3 lookfrom,        //位置点
-        point3 lookAt,          //焦点
-        vec3 vup,               //视口朝上方向
-        double vfov,            //垂直 fov 角度
-        double aspect_ratio,    //视口比例
-        double aperture,        //光圈大小
-        double focus_dist       //焦距
-    ) {
-        auto theta = degrees_to_radians(vfov);
-        auto h = tan(theta/2);
-        
-        //视口定义
-        auto viewport_height = 2.0 * h;
-        auto viewport_width = aspect_ratio * viewport_height;
+    camera() {};
 
-        //+w在后，-w在前
-        auto w = unit_vector(lookfrom - lookAt);
-        auto u = unit_vector(cross(vup, w));
-        auto v = cross(w, u);
-
-        //原点（摄像机）
-        origin = lookfrom;
-        horizontal = focus_dist * viewport_width * u;
-        vertical = focus_dist * viewport_height * v;
-        //视口左下角
-        lower_left_corner = origin - horizontal / 2 - vertical / 2 - focus_dist * w;
-
+    camera(vec3 lookfrom, vec3 lookat, vec3 vup, float vfov, float aspect, float aperture, float focus_dist) {
+        // vfov is top to bottom in degrees
         lens_radius = aperture / 2;
+        float theta = vfov * pi / 180;
+        float half_height = tan(theta / 2);
+        float half_width = aspect * half_height;
+        origin = lookfrom;
+        w = unit_vector(lookfrom - lookat);
+        u = unit_vector(cross(vup, w));
+        v = cross(w, u);
+        lower_left_corner = origin - half_width * focus_dist * u - half_height * focus_dist * v - focus_dist * w;
+        horizontal = 2 * half_width * focus_dist * u;
+        vertical = 2 * half_height * focus_dist * v;
     }
-
-    ray get_ray(double s, double t) const {
+    ray get_ray(float s, float t) {
         vec3 rd = lens_radius * random_in_unit_disk();
         vec3 offset = u * rd.x() + v * rd.y();
         return ray(origin + offset, lower_left_corner + s * horizontal + t * vertical - origin - offset);
     }
 
-private:
-    point3 origin;
-    point3 lower_left_corner;
+    vec3 origin;
+    //vec3 target;
+    //vec3 up;
+
+    vec3 lower_left_corner;
     vec3 horizontal;
     vec3 vertical;
-
     vec3 u, v, w;
-    double lens_radius;
+    float lens_radius;
+
+
+    void render(hittable_list world) {
+    
+    
+    
+    };
 };
+
+
+#endif
