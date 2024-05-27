@@ -2,6 +2,7 @@
 
 Rray Tracing Series by Peter Shirley
 
+https://raytracing.github.io/books/RayTracingInOneWeekend.html
 [toc]
 
 # 1. 概览
