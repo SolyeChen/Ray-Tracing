@@ -5,35 +5,37 @@
 
 class vec3 {
 public:
-	vec3() : m_arr{ 0, 0, 0 } {}
-	vec3(double vx, double vy, double vz) :m_arr{ vx, vy, vz } {}
+	double e[3];
 
-	double x() const { return m_arr[0]; }
-	double y() const { return m_arr[1]; }
-	double z() const { return m_arr[2]; }
+	vec3() : e{ 0, 0, 0 } {}
+	vec3(double vx, double vy, double vz) :e{ vx, vy, vz } {}
 
-	vec3 operator-() const { return vec3(-m_arr[0], -m_arr[1], -m_arr[2]); }
-	double operator[](int i) const{ return m_arr[i]; }
-	double& operator[](int i) { return m_arr[i]; }
+	double x() const { return e[0]; }
+	double y() const { return e[1]; }
+	double z() const { return e[2]; }
+
+	vec3 operator-() const { return vec3(-e[0], -e[1], -e[2]); }
+	double operator[](int i) const{ return e[i]; }
+	double& operator[](int i) { return e[i]; }
 
 	vec3& operator+=(const double t) { 
-		m_arr[0] += t;
-		m_arr[1] += t;
-		m_arr[2] += t;
+		e[0] += t;
+		e[1] += t;
+		e[2] += t;
 		return *this;
 	}
 
 	vec3& operator+=(const vec3 &v) {
-		m_arr[0] += v.m_arr[0];
-		m_arr[1] += v.m_arr[1];
-		m_arr[2] += v.m_arr[2];
+		e[0] += v.e[0];
+		e[1] += v.e[1];
+		e[2] += v.e[2];
 		return *this;
 	}
 
 	vec3& operator*=(const double t) {
-		m_arr[0] *= t;
-		m_arr[1] *= t;
-		m_arr[2] *= t;
+		e[0] *= t;
+		e[1] *= t;
+		e[2] *= t;
 		return *this;
 	}
 
@@ -47,32 +49,27 @@ public:
 	}
 
 	double length_squared() {
-		return m_arr[0] * m_arr[0] + m_arr[1] * m_arr[1] + m_arr[2] * m_arr[2];
+		return e[0] * e[0] + e[1] * e[1] + e[2] * e[2];
 	}
 
 	//Utils
 	bool near_zero() const {
 		// Return true if the vector is close to zero in all dimensions.
 		const auto s = 1e-8;
-		return (fabs(m_arr[0]) < s) && (fabs(m_arr[1]) < s) && (fabs(m_arr[2]) < s);
+		return (fabs(e[0]) < s) && (fabs(e[1]) < s) && (fabs(e[2]) < s);
 	}
-	inline static vec3 random() {
+	static vec3 random() {
 		return vec3(random_double(), random_double(), random_double());
 	}
 
-	inline static vec3 random(double min, double max) {
+	static vec3 random(double min, double max) {
 		return vec3(random_double(min, max), random_double(min, max), random_double(min, max));
 	}
-
-
-public:
-	double m_arr[3];
 };
 
 
 //Type aliases for vec3
 using point3 = vec3; //3D Position
-using color = vec3;	//RGB color
 
 
 inline std::ostream& operator << (std::ostream &out, const vec3& v3) {
@@ -80,19 +77,19 @@ inline std::ostream& operator << (std::ostream &out, const vec3& v3) {
 }
 
 inline vec3 operator + (const vec3& v1, const vec3& v2) {
-	return vec3(v1.m_arr[0] + v2.m_arr[0], v1.m_arr[1] + v2.m_arr[1], v1.m_arr[2] + v2.m_arr[2]);
+	return vec3(v1.e[0] + v2.e[0], v1.e[1] + v2.e[1], v1.e[2] + v2.e[2]);
 }
 
 inline vec3 operator - (const vec3& v1, const vec3& v2) {
-	return vec3(v1.m_arr[0] - v2.m_arr[0], v1.m_arr[1] - v2.m_arr[1], v1.m_arr[2] - v2.m_arr[2]);
+	return vec3(v1.e[0] - v2.e[0], v1.e[1] - v2.e[1], v1.e[2] - v2.e[2]);
 }
 
 inline vec3 operator * (const vec3& v1, const vec3& v2) {
-	return vec3(v1.m_arr[0] * v2.m_arr[0], v1.m_arr[1] * v2.m_arr[1], v1.m_arr[2] * v2.m_arr[2]);
+	return vec3(v1.e[0] * v2.e[0], v1.e[1] * v2.e[1], v1.e[2] * v2.e[2]);
 }
 
 inline vec3 operator * (const double t, const vec3& v) {
-	return vec3(v.m_arr[0] * t, v.m_arr[1] * t, v.m_arr[2] * t);
+	return vec3(v.e[0] * t, v.e[1] * t, v.e[2] * t);
 }
 
 inline vec3 operator * (const vec3& v, const double t) {
@@ -104,13 +101,13 @@ inline vec3 operator/(vec3 v, double t) {
 }
 
 inline double dot(const vec3& v1, const vec3& v2) {
-	return v1.m_arr[0] * v2.m_arr[0]+ v1.m_arr[1] * v2.m_arr[1]+ v1.m_arr[2] * v2.m_arr[2];
+	return v1.e[0] * v2.e[0]+ v1.e[1] * v2.e[1]+ v1.e[2] * v2.e[2];
 }
 
 inline vec3 cross(const vec3& v1, const vec3& v2) {
-	return vec3(v1.m_arr[1] * v2.m_arr[2] - v1.m_arr[2] * v2.m_arr[1],
-		v1.m_arr[2] * v2.m_arr[0] - v1.m_arr[0] * v2.m_arr[2],
-		v1.m_arr[0] * v2.m_arr[1] - v1.m_arr[1] * v2.m_arr[0]);
+	return vec3(v1.e[1] * v2.e[2] - v1.e[2] * v2.e[1],
+		v1.e[2] * v2.e[0] - v1.e[0] * v2.e[2],
+		v1.e[0] * v2.e[1] - v1.e[1] * v2.e[0]);
 }
 
 inline vec3 unit_vector(vec3 v) {
@@ -121,16 +118,16 @@ inline vec3 normalize(vec3 v){
 }
 
 inline vec3 copyVec3(vec3& v1, const vec3& v2) {
-	v1.m_arr[0] = v2.m_arr[0];
-	v1.m_arr[1] = v2.m_arr[1];
-	v1.m_arr[2] = v2.m_arr[2];
+	v1.e[0] = v2.e[0];
+	v1.e[1] = v2.e[1];
+	v1.e[2] = v2.e[2];
 	return v1;
 }
 
 inline vec3 setVec3(vec3& v, double x, double y, double z) {
-	v.m_arr[0] = x;
-	v.m_arr[1] = y;
-	v.m_arr[2] = z;
+	v.e[0] = x;
+	v.e[1] = y;
+	v.e[2] = z;
 	return v;
 }
 

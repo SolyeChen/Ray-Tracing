@@ -6,6 +6,11 @@
 #include <random>
 #include <cstdlib>
 
+// Common Headers  »á±¨´í
+//#include "color.h"
+//#include "interval.h"
+//#include "ray.h"
+//#include "vec3.h"
 // Usings
 
 using std::shared_ptr;
@@ -25,12 +30,11 @@ inline double degrees_to_radians(double degrees) {
 
 inline double random_double() {
     // Returns a random real in [0,1).
-    //return rand() / (RAND_MAX + 1.0);
+    return rand() / (RAND_MAX + 1.0);
 
-
-    static std::uniform_real_distribution<double> distribution(0.0, 1.0);
-    static std::mt19937 generator;
-    return distribution(generator);
+    //static std::uniform_real_distribution<double> distribution(0.0, 1.0);
+    //static std::mt19937 generator;
+    //return distribution(generator);
 }
 
 inline double random_double(double min, double max) {
@@ -44,5 +48,5 @@ inline double clamp(double x, double min, double max) {
     if (x > max) return max;
     return x;
 }
-// Common Headers
+
 
