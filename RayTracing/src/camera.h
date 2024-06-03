@@ -1,6 +1,5 @@
 #pragma once
 
-#include "ray.h"
 #include "rtweekend.h"
 
 #include "hittable.h"

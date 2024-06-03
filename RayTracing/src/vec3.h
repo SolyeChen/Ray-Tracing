@@ -1,8 +1,5 @@
 #pragma once
 
-#include <iostream>
-#include "rtweekend.h"
-
 class vec3 {
 public:
 	double e[3];
@@ -45,7 +42,7 @@ public:
 
 
 	double length() {
-		return std::sqrt(length_squared());
+		return sqrt(length_squared());
 	}
 
 	double length_squared() {
@@ -131,6 +128,13 @@ inline vec3 setVec3(vec3& v, double x, double y, double z) {
 	return v;
 }
 
+inline vec3 random_in_unit_disk() {
+	while (true) {
+		auto p = vec3(random_double(-1, 1), random_double(-1, 1), 0);
+		if (p.length_squared() >= 1) continue;
+		return p;
+	}
+}
 inline vec3 random_in_unit_sphere() {
 	while (true) {
 		auto p = vec3::random(-1, 1);
@@ -151,13 +155,7 @@ inline vec3 random_in_hemisphere(const vec3& normal) {
 		return -in_unit_sphere;
 }
 
-inline vec3 random_in_unit_disk() {
-	while (true) {
-		auto p = vec3(random_double(-1, 1), random_double(-1, 1), 0);
-		if (p.length_squared() >= 1) continue;
-		return p;
-	}
-}
+
 
 inline vec3 reflect(const vec3& v, const vec3& n) {
 	return v - 2 * dot(v, n) * n;

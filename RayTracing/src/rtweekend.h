@@ -5,12 +5,16 @@
 #include <memory>
 #include <random>
 #include <cstdlib>
+#include <iostream>
 
-// Common Headers  会报错
-//#include "color.h"
-//#include "interval.h"
-//#include "ray.h"
-//#include "vec3.h"
+
+// C++ Std Usings
+using std::fabs;
+using std::make_shared;
+using std::shared_ptr;
+using std::sqrt;
+
+
 // Usings
 
 using std::shared_ptr;
@@ -49,4 +53,8 @@ inline double clamp(double x, double min, double max) {
     return x;
 }
 
-
+// Common Headers  会报错
+#include "color.h"
+#include "interval.h"
+#include "ray.h"
+#include "vec3.h"

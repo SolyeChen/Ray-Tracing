@@ -144,9 +144,10 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\RayTracing.cpp" />
-    <ClCompile Include="src\vec3.h" />
+    <!-- <ClCompile Include="src\vec3.h" /> -->
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\vec3.h" />
     <ClInclude Include="src\camera.h" />
     <ClInclude Include="src\color.h" />
     <ClInclude Include="src\hittable.h" />

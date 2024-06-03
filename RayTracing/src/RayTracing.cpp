@@ -2,16 +2,15 @@
 //
 #pragma once
 #include <iostream>
+#include <vector>
 
 #include "rtweekend.h"
-#include "color.h"
+#include "camera.h"
 #include "hittable.h"
 #include "hittable_list.h"
-#include "sphere.h"
-#include "camera.h"
 #include "material.h"
+#include "sphere.h"
 
-#include <vector>
 
 hittable_list random_scene() {
     hittable_list world;
