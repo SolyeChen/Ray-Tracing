@@ -3,7 +3,7 @@
 #pragma once
 #include <iostream>
 #include <vector>
-
+#include <string>
 #include "rtweekend.h"
 #include "camera.h"
 #include "hittable.h"
@@ -55,14 +55,18 @@ hittable_list random_scene() {
 int main(int argc, char* argv[])
 {
     // Image
-    const auto aspect_ratio = 16.0 / 9.0;
+    //const auto aspect_ratio = 16.0 / 9.0;
     //const int image_width = 1080;
-    const int image_width = 108;
+    ////const int image_width = 108;
 
-    const int image_height = static_cast<int>(image_width / aspect_ratio);
-    const int samples_per_pixel = 500;
-    const int max_depth = 50;
-
+    //const int image_height = static_cast<int>(image_width / aspect_ratio);
+    //const int samples_per_pixel = 500;
+    //const int max_depth = 50;
+    int image_width = 16;
+    if (argc > 1)
+    {
+        image_width = atoi(argv[1]);
+    }
     // World
 
     //45
@@ -87,7 +91,7 @@ int main(int argc, char* argv[])
     camera cam;
 
     cam.aspect_ratio = 16.0 / 9.0;
-    cam.image_width = 108;
+    cam.image_width = image_width;
     cam.samples_per_pixel = 10;
     cam.max_depth = 20;
 
